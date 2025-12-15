@@ -5,85 +5,144 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ふたり家計簿（割り勘精算）</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <meta name="theme-color" content="#ffffff">
+  <meta name="theme-color" content="#F9FAFB">
   <style>
-    :root{ --bg:#f6f6f6; --card:#fff; --text:#111; --muted:#666; --border:#e7e7e7; }
+    :root{
+      /* Moneytree風（淡め・水色アクセント強め） */
+      --bg:#F9FAFB;
+      --card:#FFFFFF;
+      --text:#0F172A;
+      --muted:#64748B;
+      --border:#E2E8F0;
+
+      --primary:#009E6B;      /* Green */
+      --water:#00C6D8;        /* Water */
+      --sun:#F4C300;          /* Sun */
+      --danger:#E5533D;
+
+      --shadow: 0 1px 0 rgba(15,23,42,0.05), 0 10px 30px rgba(15,23,42,0.04);
+      --radius: 18px;
+    }
+
+    *{ box-sizing:border-box; }
     body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color:var(--text); background:var(--bg); }
-    header{ padding:16px 14px; display:flex; gap:10px; align-items:center; justify-content:space-between; position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--border); }
-    h1{ font-size:16px; margin:0; }
-    main{ max-width:980px; margin:0 auto; padding:14px; display:grid; gap:12px; }
+    header{
+      padding:16px 14px;
+      position:sticky; top:0;
+      background:linear-gradient(180deg, rgba(0,198,216,0.10), rgba(249,250,251,0));
+      border-bottom:1px solid rgba(226,232,240,0.8);
+      backdrop-filter: blur(6px);
+    }
+    .topbar{ max-width:1050px; margin:0 auto; display:flex; gap:12px; align-items:center; justify-content:space-between; }
+    h1{ font-size:16px; margin:0; letter-spacing:0.2px; }
+    .sub{ font-size:12px; color:var(--muted); margin-top:4px; }
+
+    main{ max-width:1050px; margin:0 auto; padding:14px; display:grid; gap:12px; }
+
     .row{ display:grid; gap:12px; grid-template-columns: 1fr; }
-    @media (min-width: 900px){ .row{ grid-template-columns: 1.1fr 0.9fr; } }
-    .card{ background:var(--card); border:1px solid var(--border); border-radius:16px; padding:14px; box-shadow: 0 1px 0 rgba(0,0,0,0.03); }
+    @media (min-width: 980px){ .row{ grid-template-columns: 1.05fr 0.95fr; } }
+
+    .card{ background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:14px; box-shadow:var(--shadow); }
+    .title{ font-size:13px; color:var(--muted); margin:0; }
+    .flex{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+
     label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
-    input, select, button, textarea{ width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:12px; padding:10px 12px; font-size:14px; background:#fff; }
-    input[type="date"]{ padding:9px 12px; }
-    button{ cursor:pointer; font-weight:600; }
-    button.primary{ border:0; padding:11px 12px; }
+    input, select, button{
+      width:100%; border:1px solid var(--border); border-radius:14px; padding:11px 12px; font-size:14px;
+      background:#fff; color:var(--text);
+    }
+    input[type="date"]{ padding:10px 12px; }
+    button{ cursor:pointer; font-weight:700; }
+    button.primary{
+      border:0;
+      color:white;
+      background: linear-gradient(135deg, var(--primary), var(--water));
+      box-shadow: 0 10px 25px rgba(0,198,216,0.18);
+    }
+    button.ghost{
+      background:#fff;
+      border:1px solid var(--border);
+      color:var(--text);
+    }
+    button:disabled{ opacity:0.45; cursor:not-allowed; }
+
     .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
     .grid3{ display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; }
+    @media (max-width: 520px){ .grid3{ grid-template-columns: 1fr; } }
+
+    .pill{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 10px; border:1px solid var(--border); border-radius:999px;
+      font-size:12px; color:var(--muted); background:#fff;
+    }
+    .dot{ width:8px; height:8px; border-radius:999px; background:var(--danger); }
+    .dot.ok{ background:var(--primary); }
+
     .muted{ color:var(--muted); font-size:12px; }
-    .pill{ display:inline-block; padding:4px 10px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:#fff; }
-    .flex{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+    .small{ font-size:12px; }
+    .danger{ color:var(--danger); }
+    .right{ text-align:right; }
+    .nowrap{ white-space:nowrap; }
+
+    .settleCard{
+      border:1px solid rgba(0,198,216,0.22);
+      background: linear-gradient(180deg, rgba(0,198,216,0.10), rgba(255,255,255,1));
+      border-radius:16px;
+      padding:12px;
+    }
+    .settleMain{
+      display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap;
+      font-weight:900; font-size:16px;
+    }
+    .settleBadge{
+      padding:7px 10px; border-radius:14px; font-weight:900;
+      background: rgba(244,195,0,0.22);
+      border:1px solid rgba(244,195,0,0.35);
+    }
+    .arrow{
+      font-size:18px;
+      background: rgba(0,158,107,0.12);
+      border:1px solid rgba(0,158,107,0.25);
+      padding:6px 10px; border-radius:999px;
+    }
+
     table{ width:100%; border-collapse:collapse; }
     th, td{ border-bottom:1px solid var(--border); padding:10px 6px; text-align:left; font-size:13px; vertical-align:top; }
-    th{ color:var(--muted); font-weight:600; }
-    .right{ text-align:right; }
-    .danger{ color:#b00020; }
-    .ok{ color:#0b6b0b; }
-    .small{ font-size:12px; }
-    .nowrap{ white-space:nowrap; }
-    .actions{ display:flex; gap:8px; }
-    .actions button{ width:auto; padding:8px 10px; font-size:12px; }
-    details summary{ cursor:pointer; }
-    code{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+    th{ color:var(--muted); font-weight:700; }
+    .tableWrap{ overflow:auto; }
+
+    .chartWrap{
+      border:1px solid var(--border);
+      border-radius:16px;
+      padding:12px;
+      background: #fff;
+    }
+    .chartRow{ display:grid; grid-template-columns: 1fr; gap:12px; }
+    @media (min-width: 980px){ .chartRow{ grid-template-columns: 1fr 1fr; } }
   </style>
+
+  <!-- Chart.js (円グラフ) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <header>
-    <div>
-      <h1>ふたり家計簿（割り勘精算）</h1>
-      <div class="muted">各自が支出を入力 → 月ごとに集計 → 精算額を自動計算</div>
+    <div class="topbar">
+      <div>
+        <h1>ふたり家計簿（割り勘精算）</h1>
+        <div class="sub">各自が入力 → 任意のタイミングで精算確定 → 月次も確認</div>
+      </div>
+      <div class="pill" id="statusPill"><span class="dot" id="statusDot"></span><span id="statusText">未接続</span></div>
     </div>
-    <div class="pill" id="statusPill">未接続</div>
   </header>
 
   <main>
     <div class="row">
+      <!-- 入力 -->
       <section class="card">
         <div class="flex">
           <div>
-            <div class="muted">1) 世帯コード（2人で同じものを入力）</div>
-            <div class="small">例: <code>nagatake-2025</code>（推測されにくい文字列推奨）</div>
-          </div>
-        </div>
-        <div class="grid2" style="margin-top:10px">
-          <div>
-            <label>世帯コード</label>
-            <input id="householdId" placeholder="例: abcdef-1234" />
-          </div>
-          <div>
-            <label>あなたの表示名</label>
-            <input id="displayName" placeholder="例: 夫 / 妻 / Tomo / Mika" />
-          </div>
-        </div>
-        <div class="grid2" style="margin-top:10px">
-          <button class="primary" id="btnConnect">接続（匿名ログイン）</button>
-          <button id="btnDisconnect">切断</button>
-        </div>
-
-        <details style="margin-top:12px">
-          <summary class="muted">Firebase設定（初回のみ）</summary>
-          <p class="muted small">Firebase Console の「Webアプリ」SDK設定を <code>app.js</code> の <code>firebaseConfig</code> に貼り付けてください。</p>
-          <p class="muted small">Firestore で <code>households/{householdId}/expenses</code> に書き込みます。</p>
-        </details>
-      </section>
-
-      <section class="card">
-        <div class="flex">
-          <div>
-            <div class="muted">2) 入力</div>
-            <div class="small muted">支出した人は自動的に「あなた」になります</div>
+            <div class="title">支出の入力</div>
+            <div class="muted">支出した人は自動的に「あなた」になります</div>
           </div>
           <span class="pill" id="whoami">未ログイン</span>
         </div>
@@ -111,90 +170,176 @@
             <input id="amount" type="number" inputmode="numeric" min="0" step="1" placeholder="例: 1280" />
           </div>
         </div>
+
         <div style="margin-top:10px">
           <label>メモ（任意）</label>
           <input id="memo" placeholder="例: スーパー / ドラッグストア など" />
         </div>
+
         <div class="grid2" style="margin-top:10px">
           <button class="primary" id="btnAdd">追加</button>
-          <button id="btnClear">クリア</button>
+          <button class="ghost" id="btnClear">クリア</button>
         </div>
 
         <div id="addMsg" class="muted small" style="margin-top:10px"></div>
       </section>
+
+      <!-- 集計 + 精算 -->
+      <section class="card">
+        <div class="flex">
+          <div>
+            <div class="title">集計と精算</div>
+            <div class="muted">「未精算期間」または「月次」を切り替えできます</div>
+          </div>
+          <div class="flex" style="gap:8px">
+            <select id="monthSelect" title="月を選択" style="width:auto; min-width: 160px"></select>
+            <button id="btnToggleView" class="ghost" style="width:auto">月次に切替</button>
+          </div>
+        </div>
+
+        <div class="grid2" style="margin-top:12px">
+          <div>
+            <div class="muted small">あなたの合計</div>
+            <div style="font-size:22px; font-weight:900" id="myTotal">-</div>
+          </div>
+          <div>
+            <div class="muted small">相手の合計</div>
+            <div style="font-size:22px; font-weight:900" id="otherTotal">-</div>
+          </div>
+        </div>
+
+        <div class="settleCard" style="margin-top:12px">
+          <div class="muted small">精算対象期間：<span id="periodText">-</span></div>
+          <div class="settleMain" style="margin-top:8px">
+            <div class="arrow" id="arrowText">↔</div>
+            <div id="settlementText">-</div>
+            <div class="settleBadge" id="settlementAmount">-</div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <button id="btnSettleNow" class="primary">いまの未精算分を精算して確定</button>
+            <button id="btnShowHistory" class="ghost">精算履歴</button>
+          </div>
+          <div class="muted small" id="settleMsg" style="margin-top:8px"></div>
+        </div>
+      </section>
     </div>
 
+    <!-- 月次カテゴリ円グラフ + 月次サマリー -->
     <section class="card">
       <div class="flex">
         <div>
-          <div class="muted">3) 月次集計と精算</div>
-          <div class="small muted">「両者の支出額を同じ」にするための支払い額を表示します</div>
-        </div>
-        <div class="actions">
-          <select id="monthSelect" title="月を選択" style="width:auto; min-width: 160px"></select>
-          <button id="btnRefresh" style="width:auto">更新</button>
+          <div class="title">月次（カテゴリ別）</div>
+          <div class="muted">選択した月の支出を円グラフで表示します</div>
         </div>
       </div>
 
-      <div class="grid2" style="margin-top:12px">
-        <div>
-          <div class="muted small">あなたの合計</div>
-          <div style="font-size:20px; font-weight:800" id="myTotal">-</div>
+      <div class="chartRow" style="margin-top:12px">
+        <div class="chartWrap">
+          <div class="muted small">カテゴリ別内訳（円グラフ）</div>
+          <canvas id="pieChart" height="220" style="margin-top:8px"></canvas>
+          <div class="muted small" id="pieMsg" style="margin-top:6px"></div>
         </div>
-        <div>
-          <div class="muted small">相手の合計</div>
-          <div style="font-size:20px; font-weight:800" id="otherTotal">-</div>
-        </div>
-      </div>
 
-      <div style="margin-top:10px; padding:12px; border:1px solid var(--border); border-radius:14px; background:#fff">
-        <div class="muted small">精算結果</div>
-        <div id="settlement" style="font-size:16px; font-weight:800; margin-top:4px">-</div>
-        <div class="muted small" style="margin-top:6px">
-          ルール：月合計を2等分し、差額の半分を支払う（片方が多く払っていれば、もう片方が不足分を支払う）
+        <div class="chartWrap">
+          <div class="muted small">月次サマリー</div>
+          <div style="margin-top:10px">
+            <div class="muted small">世帯の合計</div>
+            <div style="font-size:26px; font-weight:1000" id="monthTotal">-</div>
+          </div>
+          <div style="margin-top:10px">
+            <table>
+              <tbody>
+                <tr><td class="muted">あなた</td><td class="right" id="monthMy">-</td></tr>
+                <tr><td class="muted">相手</td><td class="right" id="monthOther">-</td></tr>
+                <tr><td class="muted">件数</td><td class="right" id="monthCount">-</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-
-      <div style="margin-top:14px">
-        <div class="muted small">明細</div>
-        <div style="overflow:auto; margin-top:6px">
-          <table>
-            <thead>
-              <tr>
-                <th class="nowrap">日付</th>
-                <th>カテゴリ</th>
-                <th>メモ</th>
-                <th>支払者</th>
-                <th class="right nowrap">金額</th>
-                <th class="right nowrap">操作</th>
-              </tr>
-            </thead>
-            <tbody id="tbody"></tbody>
-          </table>
-        </div>
-        <div class="muted small" id="listMsg" style="margin-top:8px"></div>
       </div>
     </section>
 
+    <!-- 明細 -->
     <section class="card">
-      <div class="muted">セキュリティ（簡易）</div>
-      <div class="muted small" style="margin-top:6px">
-        まずは匿名ログイン必須にした最小ルールを同梱しています。運用では「世帯コードを知っているだけで読める」状態になり得るため、
-        共同生活者以外に漏れないコードにしてください（必要なら、より堅牢なルール案も作れます）。
+      <div class="flex">
+        <div>
+          <div class="title">明細</div>
+          <div class="muted" id="listModeText">未精算期間の明細を表示</div>
+        </div>
       </div>
-      <pre class="small" style="white-space:pre-wrap; margin-top:10px; background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px">
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /households/{hid}/expenses/{docId} {
-      allow read, write: if request.auth != null;
-    }
-    match /households/{hid}/members/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
-    }
-  }
-}
-      </pre>
+
+      <div class="tableWrap" style="margin-top:10px">
+        <table>
+          <thead>
+            <tr>
+              <th class="nowrap">日付</th>
+              <th>カテゴリ</th>
+              <th>メモ</th>
+              <th>支払者</th>
+              <th class="right nowrap">金額</th>
+              <th class="right nowrap">操作</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="muted small" id="listMsg" style="margin-top:8px"></div>
+    </section>
+
+    <!-- 精算履歴（折りたたみ） -->
+    <section class="card" id="historyCard" style="display:none">
+      <div class="flex">
+        <div>
+          <div class="title">精算履歴</div>
+          <div class="muted">過去に確定した精算の記録です</div>
+        </div>
+        <button class="ghost" id="btnHideHistory" style="width:auto">閉じる</button>
+      </div>
+
+      <div class="tableWrap" style="margin-top:10px">
+        <table>
+          <thead>
+            <tr>
+              <th class="nowrap">確定日</th>
+              <th class="nowrap">期間</th>
+              <th>結果</th>
+              <th class="right nowrap">金額</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+      <div class="muted small" id="historyMsg" style="margin-top:8px"></div>
+    </section>
+
+    <!-- ★ 世帯コード（最下部） -->
+    <section class="card">
+      <div class="flex">
+        <div>
+          <div class="title">1) 世帯コード（2人で同じものを入力）</div>
+          <div class="muted">推測されにくい文字列推奨（例: <code>tomomika-2025-9XkQ</code>）</div>
+        </div>
+      </div>
+
+      <div class="grid2" style="margin-top:10px">
+        <div>
+          <label>世帯コード</label>
+          <input id="householdId" placeholder="例: abcdef-1234" />
+        </div>
+        <div>
+          <label>あなたの表示名</label>
+          <input id="displayName" placeholder="例: 夫 / 妻 / Tomo / Mika" />
+        </div>
+      </div>
+
+      <div class="grid2" style="margin-top:10px">
+        <button class="primary" id="btnConnect">接続（匿名ログイン）</button>
+        <button class="ghost" id="btnDisconnect">切断</button>
+      </div>
+
+      <div class="muted small" style="margin-top:10px">
+        初回のみ：Firebase の Web SDK 設定（firebaseConfig）を <code>app.js</code> に貼り付けてください。
+      </div>
     </section>
   </main>
 
