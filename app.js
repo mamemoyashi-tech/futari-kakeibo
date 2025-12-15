@@ -1,19 +1,16 @@
+// ふたり家計簿（割り勘精算）
+// - Firebase (v10 modular) + Firestore
+// - 匿名ログインで、世帯コード householdId ごとに expenses を共有
+// - 月次集計：当月合計を2等分し、差額の半分を精算額として表示
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getFirestore, collection, doc, setDoc, addDoc, deleteDoc,
-  onSnapshot, query, orderBy, Timestamp,
-  writeBatch
+  onSnapshot, query, orderBy, where, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
   getAuth, signInAnonymously, onAuthStateChanged, signOut, updateProfile
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-
-/**
- * ふたり家計簿（割り勘精算）
- * - 任意精算（未精算分を確定）＋精算履歴
- * - 月次カテゴリ別円グラフ（Chart.js）
- * - UI操作（表示切替/月選択）で必ず再描画する（←今回の修正ポイント）
- */
 
 // TODO: Firebase Console の Web SDK 設定を貼り付けてください
 const firebaseConfig = {
@@ -30,47 +27,45 @@ let uid = null;
 let householdId = null;
 let displayName = null;
 
-let stopRealtime = null;
-let viewMode = "unsettled"; // "unsettled" | "monthly"
-let lastSettlementAt = null; // Timestamp|null
-
-let pieChart = null;
-
-// ★ 再描画用の状態（リアルタイム購読で更新 → rerender で描画）
-let __allRows = [];
-let __membersByUid = new Map();
-let __latestUnsettled = [];
-
 const el = (id) => document.getElementById(id);
-const pad2 = (n) => String(n).padStart(2, "0");
 const fmtYen = (n) => `${Math.round(n).toLocaleString("ja-JP")}円`;
+const pad2 = (n) => String(n).padStart(2, "0");
 
 function yyyymmFromDate(d){
-  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}`;
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  return `${y}-${pad2(m)}`; // YYYY-MM
 }
+
 function parseDateInput(val){
+  // val: "YYYY-MM-DD"
   if(!val) return null;
   const [y,m,d] = val.split("-").map(Number);
   return new Date(y, m-1, d);
 }
+
 function defaultDate(){
   const d = new Date();
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
 }
 
 function setStatus(text, ok=true){
-  el("statusText").textContent = text;
-  el("statusDot").className = "dot " + (ok ? "ok" : "");
+  const pill = el("statusPill");
+  pill.textContent = text;
+  pill.className = "pill " + (ok ? "ok" : "danger");
 }
-function setMsg(id, msg, isError=false){
-  const a = el(id);
+
+function setAddMsg(msg, isError=false){
+  const a = el("addMsg");
   a.textContent = msg;
   a.className = "muted small " + (isError ? "danger" : "");
 }
-const setAddMsg = (m,e=false)=>setMsg("addMsg", m, e);
-const setListMsg = (m,e=false)=>setMsg("listMsg", m, e);
-const setSettleMsg = (m,e=false)=>setMsg("settleMsg", m, e);
-const setHistoryMsg = (m,e=false)=>setMsg("historyMsg", m, e);
+
+function setListMsg(msg, isError=false){
+  const a = el("listMsg");
+  a.textContent = msg;
+  a.className = "muted small " + (isError ? "danger" : "");
+}
 
 function ensureFirebaseInitialized(){
   if(app) return;
@@ -83,72 +78,17 @@ function saveLocal(){
   localStorage.setItem("hh_householdId", householdId ?? "");
   localStorage.setItem("hh_displayName", displayName ?? "");
 }
+
 function loadLocal(){
-  el("householdId").value = localStorage.getItem("hh_householdId") || "";
-  el("displayName").value = localStorage.getItem("hh_displayName") || "";
-}
-
-function colExpenses(){ return collection(db, "households", householdId, "expenses"); }
-function colMembers(){ return collection(db, "households", householdId, "members"); }
-function docState(){ return doc(db, "households", householdId, "state"); }
-function colSettlements(){ return collection(db, "households", householdId, "settlements"); }
-
-function escapeHtml(str){
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-function fmtDate(ts){
-  if(!ts) return "初回";
-  const d = ts.toDate();
-  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
-}
-
-function computeSettlement(my, other){
-  const total = my + other;
-  const target = total / 2;
-  const myDiff = my - target; // +なら払い過ぎ
-  if(Math.abs(myDiff) < 0.5) return { dir:"none", amount:0, text:"精算不要", arrow:"↔" };
-  const amount = Math.round(Math.abs(myDiff));
-  if(myDiff > 0) return { dir:"other_to_me", amount, text:"相手 → あなた", arrow:"←" };
-  return { dir:"me_to_other", amount, text:"あなた → 相手", arrow:"→" };
-}
-
-function updateTotalsUI(my, other){
-  el("myTotal").textContent = my==null ? "-" : fmtYen(my);
-  el("otherTotal").textContent = other==null ? "-" : fmtYen(other);
-}
-function setSettlementUI(res){
-  el("arrowText").textContent = res.arrow || "↔";
-  el("settlementText").textContent = res.text || "-";
-  el("settlementAmount").textContent = res.amount ? fmtYen(res.amount) : "-";
-}
-function updateMonthlyUI(total, my, other, count){
-  el("monthTotal").textContent = total==null ? "-" : fmtYen(total);
-  el("monthMy").textContent = my==null ? "-" : fmtYen(my);
-  el("monthOther").textContent = other==null ? "-" : fmtYen(other);
-  el("monthCount").textContent = count==null ? "-" : `${count}件`;
-}
-
-function initMonthSelect(){
-  const now = new Date();
-  const sel = el("monthSelect");
-  sel.innerHTML = "";
-  for(let i=0;i<18;i++){
-    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-    const mm = yyyymmFromDate(d);
-    const opt = document.createElement("option");
-    opt.value = mm; opt.textContent = mm;
-    sel.appendChild(opt);
-  }
-  sel.value = yyyymmFromDate(now);
+  const hid = localStorage.getItem("hh_householdId") || "";
+  const name = localStorage.getItem("hh_displayName") || "";
+  el("householdId").value = hid;
+  el("displayName").value = name;
 }
 
 async function connect(){
   ensureFirebaseInitialized();
+
   householdId = (el("householdId").value || "").trim();
   displayName = (el("displayName").value || "").trim();
 
@@ -161,59 +101,83 @@ async function connect(){
     return;
   }
   saveLocal();
+
   setAddMsg("");
   setStatus("接続中…", true);
 
   await signInAnonymously(auth);
-  try{ await updateProfile(auth.currentUser, { displayName }); } catch(_){}
 
+  // profile（匿名でもdisplayNameは持てます）
+  try{
+    await updateProfile(auth.currentUser, { displayName });
+  }catch(e){
+    // 無視しても動く
+  }
+
+  // members に表示名を保存（任意）
   try{
     await setDoc(doc(db, "households", householdId, "members", auth.currentUser.uid), {
-      displayName, updatedAt: Timestamp.now()
-    }, { merge:true });
-  }catch(_){}
+      displayName,
+      updatedAt: Timestamp.now()
+    }, { merge: true });
+  }catch(e){
+    // 無視しても動く
+  }
 }
 
 async function disconnect(){
   if(!auth) return;
   await signOut(auth);
+  uid = null;
+  setStatus("未接続", false);
+  el("whoami").textContent = "未ログイン";
+  setListMsg("切断しました。");
+  el("tbody").innerHTML = "";
+  el("myTotal").textContent = "-";
+  el("otherTotal").textContent = "-";
+  el("settlement").textContent = "-";
 }
 
-async function addExpense(){
-  if(!db || !uid || !householdId){
-    setAddMsg("先に「接続」を押してください。", true);
-    return;
+function getExpensesCol(){
+  return collection(db, "households", householdId, "expenses");
+}
+
+function getMonthBounds(yyyymm){
+  const [y,m] = yyyymm.split("-").map(Number);
+  const start = new Date(y, m-1, 1, 0,0,0,0);
+  const end = new Date(y, m, 1, 0,0,0,0);
+  return { start, end };
+}
+
+function updateMonthSelect(months){
+  const sel = el("monthSelect");
+  const current = sel.value;
+  sel.innerHTML = "";
+  months.forEach(mm => {
+    const opt = document.createElement("option");
+    opt.value = mm;
+    opt.textContent = mm;
+    sel.appendChild(opt);
+  });
+  if(current && months.includes(current)) sel.value = current;
+}
+
+function computeSettlement(my, other){
+  // 2人均等：各自が目標 = (my + other)/2
+  const total = my + other;
+  const target = total / 2;
+  const myDiff = my - target; // +なら払い過ぎ、-なら不足
+  // 相手 → 自分へ支払う額（正なら相手が自分に払う／負なら自分が相手に払う）
+  // ただし表示では「どちらがどちらにいくら」を出す
+  if(Math.abs(myDiff) < 0.5){
+    return { text: "精算不要（ぴったり同額）", dir: "none", amount: 0 };
   }
-  const d = parseDateInput(el("date").value || defaultDate());
-  const amount = Number(el("amount").value);
-  const category = el("category").value;
-  const memo = (el("memo").value || "").trim();
-
-  if(!d){ setAddMsg("日付を入力してください。", true); return; }
-  if(!Number.isFinite(amount) || amount <= 0){ setAddMsg("金額を正しく入力してください。", true); return; }
-
-  const docData = {
-    date: Timestamp.fromDate(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12,0,0,0)),
-    yyyymm: yyyymmFromDate(d),
-    category,
-    amount: Math.round(amount),
-    memo,
-    payerUid: uid,
-    payerName: displayName,
-    createdAt: Timestamp.now(),
-    settled: false,
-    settledAt: null
-  };
-
-  try{
-    await addDoc(colExpenses(), docData);
-    setAddMsg("追加しました。");
-    el("amount").value = "";
-    el("memo").value = "";
-    // ★ 追加直後に即再描画
-    rerender();
-  }catch(e){
-    setAddMsg("追加に失敗しました: " + e.message, true);
+  const amount = Math.round(Math.abs(myDiff));
+  if(myDiff > 0){
+    // 自分が多く払っている -> 相手が自分に払う
+    return { text: `相手 → あなた に ${fmtYen(amount)} 支払う`, dir: "other_to_me", amount };
+  }else{
+    return { text: `あなた → 相手 に ${fmtYen(amount)} 支払う`, dir: "me_to_other", amount };
   }
 }
 
@@ -222,6 +186,7 @@ function renderTable(rows, membersByUid){
   tbody.innerHTML = "";
   for(const r of rows){
     const tr = document.createElement("tr");
+
     const dt = r.date?.toDate ? r.date.toDate() : null;
     const dateStr = dt ? `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())}` : "-";
     const payerName = (membersByUid.get(r.payerUid) || r.payerName || r.payerUid || "").toString();
@@ -235,249 +200,169 @@ function renderTable(rows, membersByUid){
       <td class="right nowrap"></td>
     `;
 
-    const td = tr.querySelector("td:last-child");
+    const tdAct = tr.querySelector("td:last-child");
     const btn = document.createElement("button");
     btn.textContent = "削除";
-    btn.className = "ghost";
-    btn.disabled = (r.payerUid !== uid);
-    btn.title = btn.disabled ? "自分の入力分のみ削除できます" : "削除";
-    btn.onclick = async () => {
+    btn.className = "danger";
+    btn.addEventListener("click", async () => {
       if(!confirm("この明細を削除しますか？")) return;
       try{
         await deleteDoc(doc(db, "households", householdId, "expenses", r.id));
       }catch(e){
         alert("削除に失敗しました: " + e.message);
       }
-    };
-    td.appendChild(btn);
+    });
+    // 自分の明細だけ削除可能に（UIだけ。ルールで縛るなら後述）
+    btn.disabled = (r.payerUid !== uid);
+    btn.title = btn.disabled ? "自分の入力分のみ削除できます" : "削除";
+    tdAct.appendChild(btn);
+
     tbody.appendChild(tr);
   }
 }
 
-function updatePieChart(categoryTotals, monthLabel){
-  if(!window.Chart){
-    el("pieMsg").textContent = "円グラフが読み込めませんでした（ネットワーク制限の可能性）";
-    return;
-  }
-
-  const labels = Object.keys(categoryTotals);
-  const values = labels.map(k => categoryTotals[k]);
-
-  const sum = values.reduce((a,b)=>a+b,0);
-  el("pieMsg").textContent = sum ? `${monthLabel} のカテゴリ別内訳` : "この月の明細がありません。";
-
-  const ctx = el("pieChart");
-  const data = { labels, datasets:[{ data: values }] };
-
-  if(pieChart){
-    pieChart.data = data;
-    pieChart.update();
-  }else{
-    pieChart = new window.Chart(ctx, {
-      type: "pie",
-      data,
-      options: { responsive:true, plugins:{ legend:{ position:"bottom" } } }
-    });
-  }
+function escapeHtml(str){
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-async function settleNow(unsettledRows, membersByUid){
-  if(!unsettledRows || unsettledRows.length === 0){
-    setSettleMsg("未精算の明細がありません。");
+function initMonthSelectDefault(){
+  const d = new Date();
+  const thisMonth = yyyymmFromDate(d);
+  updateMonthSelect([thisMonth]);
+  el("monthSelect").value = thisMonth;
+}
+
+async function addExpense(){
+  if(!db || !uid || !householdId){
+    setAddMsg("先に「接続」を押してください。", true);
     return;
   }
-  const fromText = fmtDate(lastSettlementAt);
-  if(!confirm(`未精算分（${fromText} 〜 今日）を精算済みにして確定しますか？\n（以後この期間は未精算集計から除外されます）`)) return;
+  const dateVal = el("date").value || defaultDate();
+  const d = parseDateInput(dateVal);
+  const category = el("category").value;
+  const amount = Number(el("amount").value);
+  const memo = (el("memo").value || "").trim();
+
+  if(!d){
+    setAddMsg("日付を入力してください。", true);
+    return;
+  }
+  if(!Number.isFinite(amount) || amount <= 0){
+    setAddMsg("金額を正しく入力してください。", true);
+    return;
+  }
+
+  const docData = {
+    date: Timestamp.fromDate(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12,0,0,0)),
+    yyyymm: yyyymmFromDate(d),
+    category,
+    amount: Math.round(amount),
+    memo,
+    payerUid: uid,
+    payerName: displayName,
+    createdAt: Timestamp.now()
+  };
 
   try{
-    let my=0, other=0;
-    for(const r of unsettledRows){
-      if(r.payerUid === uid) my += (r.amount||0);
-      else other += (r.amount||0);
-    }
-    const res = computeSettlement(my, other);
-
-    const meName = (membersByUid.get(uid) || displayName || "あなた");
-    let otherUid = null;
-    for(const r of unsettledRows){ if(r.payerUid && r.payerUid !== uid){ otherUid = r.payerUid; break; } }
-    const otherName = otherUid ? (membersByUid.get(otherUid) || "相手") : "相手";
-
-    let resultText = "精算不要";
-    if(res.dir === "me_to_other") resultText = `${meName} → ${otherName}`;
-    if(res.dir === "other_to_me") resultText = `${otherName} → ${meName}`;
-
-    const now = Timestamp.now();
-
-    await addDoc(colSettlements(), {
-      fromAt: lastSettlementAt || null,
-      toAt: now,
-      direction: res.dir,
-      amount: res.amount,
-      resultText,
-      myTotal: my,
-      otherTotal: other,
-      createdAt: now,
-      createdBy: uid
-    });
-
-    for(let i=0;i<unsettledRows.length;i+=450){
-      const chunk = unsettledRows.slice(i, i+450);
-      const batch = writeBatch(db);
-      chunk.forEach(r => batch.update(doc(db, "households", householdId, "expenses", r.id), { settled:true, settledAt: now }));
-      await batch.commit();
-    }
-
-    await setDoc(docState(), {
-      lastSettlementAt: now,
-      lastSettlementBy: uid,
-      updatedAt: now
-    }, { merge:true });
-
-    setSettleMsg(`未精算 ${unsettledRows.length} 件を精算済みにして確定しました。`);
+    await addDoc(getExpensesCol(), docData);
+    setAddMsg("追加しました。");
+    el("amount").value = "";
+    el("memo").value = "";
   }catch(e){
-    setSettleMsg("精算確定に失敗しました: " + e.message, true);
+    setAddMsg("追加に失敗しました: " + e.message, true);
   }
-}
-
-function renderHistory(rows){
-  const body = el("historyBody");
-  body.innerHTML = "";
-  if(!rows || rows.length === 0){
-    setHistoryMsg("まだ精算履歴がありません。");
-    return;
-  }
-  setHistoryMsg(`${rows.length} 件`);
-  for(const r of rows){
-    const tr = document.createElement("tr");
-    const created = r.createdAt?.toDate ? r.createdAt.toDate() : null;
-    const createdStr = created ? `${created.getFullYear()}-${pad2(created.getMonth()+1)}-${pad2(created.getDate())}` : "-";
-    const from = r.fromAt ? fmtDate(r.fromAt) : "初回";
-    const to = r.toAt ? fmtDate(r.toAt) : "-";
-    tr.innerHTML = `
-      <td class="nowrap">${createdStr}</td>
-      <td class="nowrap">${from}〜${to}</td>
-      <td>${escapeHtml(r.resultText || "精算")}</td>
-      <td class="right nowrap">${r.amount ? fmtYen(r.amount) : "-"}</td>
-    `;
-    body.appendChild(tr);
-  }
-}
-
-function rerender(){
-  const rows = __allRows;
-  const membersByUid = __membersByUid;
-  const selMonth = el("monthSelect").value;
-
-  let viewRows;
-  if(viewMode === "unsettled"){
-    viewRows = rows.filter(r => r.settled === false);
-    el("listModeText").textContent = "未精算期間の明細を表示";
-  }else{
-    viewRows = rows.filter(r => r.yyyymm === selMonth);
-    el("listModeText").textContent = "月次（選択月）の明細を表示";
-  }
-  viewRows.sort((a,b)=>(a.date?.seconds||0)-(b.date?.seconds||0));
-  renderTable(viewRows, membersByUid);
-  setListMsg(viewRows.length ? `${viewRows.length} 件` : "明細がありません。");
-
-  __latestUnsettled = rows.filter(r => r.settled === false);
-  let my=0, other=0;
-  for(const r of __latestUnsettled){
-    if(r.payerUid === uid) my += (r.amount||0);
-    else other += (r.amount||0);
-  }
-  updateTotalsUI(my, other);
-  setSettlementUI(computeSettlement(my, other));
-
-  const monthRows = rows.filter(r => r.yyyymm === selMonth);
-  let mt=0, mm=0, mo=0;
-  const catTotals = {};
-  for(const r of monthRows){
-    mt += (r.amount||0);
-    if(r.payerUid === uid) mm += (r.amount||0);
-    else mo += (r.amount||0);
-    const c = r.category || "その他";
-    catTotals[c] = (catTotals[c]||0) + (r.amount||0);
-  }
-  updateMonthlyUI(mt, mm, mo, monthRows.length);
-
-  ["食費","日用品","雑費","外食","交通","医療","娯楽","その他"].forEach(k=>{ if(!(k in catTotals)) catTotals[k]=0; });
-  updatePieChart(catTotals, selMonth);
-
-  el("btnSettleNow").onclick = () => settleNow(__latestUnsettled, membersByUid);
 }
 
 function startRealtime(){
-  const unsubMembers = onSnapshot(colMembers(), (snap)=>{
-    __membersByUid = new Map();
-    snap.docs.forEach(d => __membersByUid.set(d.id, d.data().displayName || d.id));
-    rerender();
-  });
+  // members 取得（表示名）
+  const membersByUid = new Map();
 
-  const unsubState = onSnapshot(docState(), (snap)=>{
-    const data = snap.exists() ? snap.data() : {};
-    lastSettlementAt = data.lastSettlementAt || null;
-    el("periodText").textContent = `${fmtDate(lastSettlementAt)} 〜 今日`;
-  });
+  const unsubMembers = onSnapshot(
+    collection(db, "households", householdId, "members"),
+    (snap) => {
+      membersByUid.clear();
+      snap.docs.forEach(d => membersByUid.set(d.id, d.data().displayName || d.id));
+    }
+  );
 
-  const unsubExpenses = onSnapshot(query(colExpenses(), orderBy("date","asc")), (snap)=>{
-    __allRows = snap.docs.map(d=>({ id:d.id, ...d.data() }));
-    rerender();
-  }, (err)=> setListMsg("取得に失敗: " + err.message, true));
+  // 月の候補（直近12ヶ月 + 明細に存在する月）
+  const now = new Date();
+  const preset = [];
+  for(let i=0;i<12;i++){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    preset.push(yyyymmFromDate(d));
+  }
+  updateMonthSelect(preset);
 
-  const unsubHist = onSnapshot(query(colSettlements(), orderBy("createdAt","desc")), (snap)=>{
-    const rows = snap.docs.map(d=>({ id:d.id, ...d.data() }));
-    renderHistory(rows.slice(0,30));
-  }, (err)=> setHistoryMsg("履歴取得に失敗: " + err.message, true));
+  const rerender = (snap) => {
+    const selMonth = el("monthSelect").value || yyyymmFromDate(new Date());
+    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // 月候補の拡張
+    const monthsInData = [...new Set(rows.map(r => r.yyyymm).filter(Boolean))].sort().reverse();
+    const merged = [...new Set([...monthsInData, ...preset])];
+    updateMonthSelect(merged);
 
-  return ()=>{ unsubMembers(); unsubState(); unsubExpenses(); unsubHist(); };
+    // 選択月でフィルタ
+    const filtered = rows.filter(r => r.yyyymm === selMonth);
+    filtered.sort((a,b) => (a.date?.seconds||0) - (b.date?.seconds||0));
+
+    // 合計
+    let my = 0, other = 0;
+    for(const r of filtered){
+      if(r.payerUid === uid) my += (r.amount||0);
+      else other += (r.amount||0);
+    }
+
+    el("myTotal").textContent = fmtYen(my);
+    el("otherTotal").textContent = fmtYen(other);
+    el("settlement").textContent = computeSettlement(my, other).text;
+
+    renderTable(filtered, membersByUid);
+
+    if(filtered.length === 0) setListMsg("この月の明細はまだありません。");
+    else setListMsg(`${filtered.length} 件`);
+  };
+
+  // 初回は選択月に基づいて where してもよいが、簡便のため household の全明細を購読（小規模想定）
+  // 大量になる場合は、monthSelect変更時に購読を切り替える実装にしてください。
+  const qAll = query(getExpensesCol(), orderBy("date", "asc"));
+  const unsubExpenses = onSnapshot(qAll, rerender, (err) => setListMsg("取得に失敗: " + err.message, true));
+
+  // monthSelect 変更で再計算だけ（購読データは上記で保持）
+  el("monthSelect").addEventListener("change", () => { /* onSnapshot rerender が最新 snap で走るため、btnRefreshで再描画 */ });
+  el("btnRefresh").addEventListener("click", () => { /* no-op: snap更新待ち */ });
+
+  return () => { unsubExpenses(); unsubMembers(); };
 }
 
+let stopRealtime = null;
+
 function wireUI(){
-  el("btnConnect").onclick = connect;
-  el("btnDisconnect").onclick = disconnect;
-  el("btnAdd").onclick = addExpense;
-  el("btnClear").onclick = ()=>{ el("amount").value=""; el("memo").value=""; setAddMsg(""); };
-
-  el("btnToggleView").onclick = ()=>{
-    viewMode = (viewMode === "unsettled") ? "monthly" : "unsettled";
-    el("btnToggleView").textContent = (viewMode === "unsettled") ? "月次に切替" : "未精算に切替";
-    rerender();
-  };
-
-  el("monthSelect").addEventListener("change", rerender);
-
-  el("btnShowHistory").onclick = ()=>{
-    el("historyCard").style.display = "block";
-    el("historyCard").scrollIntoView({ behavior:"smooth", block:"start" });
-  };
-  el("btnHideHistory").onclick = ()=> el("historyCard").style.display = "none";
-
+  el("btnConnect").addEventListener("click", connect);
+  el("btnDisconnect").addEventListener("click", disconnect);
+  el("btnAdd").addEventListener("click", addExpense);
+  el("btnClear").addEventListener("click", () => { el("amount").value=""; el("memo").value=""; setAddMsg(""); });
   el("date").value = defaultDate();
-  initMonthSelect();
+  initMonthSelectDefault();
   loadLocal();
 }
 
 wireUI();
 
-function getAuthSafe(){ ensureFirebaseInitialized(); return auth; }
-
-onAuthStateChanged(getAuthSafe(), (user)=>{
+onAuthStateChanged(getAuthSafe(), async (user) => {
   if(!user){
-    uid = null;
     setStatus("未接続", false);
-    el("whoami").textContent = "未ログイン";
-    setListMsg("");
-    setSettleMsg("");
-    updateTotalsUI(null, null);
-    updateMonthlyUI(null, null, null, null);
-    setSettlementUI({dir:"none", amount:0, text:"-", arrow:"↔"});
-    el("periodText").textContent = "-";
     return;
   }
   uid = user.uid;
   displayName = (el("displayName").value || user.displayName || "あなた").trim();
   el("whoami").textContent = displayName;
+
   setStatus("接続済み", true);
 
   householdId = (el("householdId").value || "").trim();
@@ -485,7 +370,12 @@ onAuthStateChanged(getAuthSafe(), (user)=>{
     setListMsg("世帯コードを入力してください。", true);
     return;
   }
+
   if(stopRealtime) stopRealtime();
   stopRealtime = startRealtime();
-  rerender();
 });
+
+function getAuthSafe(){
+  ensureFirebaseInitialized();
+  return auth;
+}
