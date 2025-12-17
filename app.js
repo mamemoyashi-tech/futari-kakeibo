@@ -22,10 +22,16 @@ const firebaseConfig = {
   appId: "1:723945894846:web:d8a17f0aae8bbf25323fef"
 };
 
+
 let app, db, auth;
 let uid = null;
 let householdId = null;
 let displayName = null;
+
+// Realtime購読は「接続」操作の完了後に開始する。
+// （Firestore ルールで members 登録を必須にしている場合、
+//  ログイン直後に購読を開始すると Missing permissions になり得るため）
+let isConnected = false;
 
 let pieChart = null;
 
@@ -292,6 +298,13 @@ async function connect(){
   setAddMsg("");
   setStatus("接続中…", true);
 
+  // いったん既存購読を止める（別世帯への接続切替など）
+  if(stopRealtime){
+    stopRealtime();
+    stopRealtime = null;
+  }
+  isConnected = false;
+
   try{
     await signInAnonymously(auth);
   }catch(e){
@@ -321,12 +334,23 @@ async function connect(){
     // 無視しても動く（権限設定等で失敗しても、expenses 自体は共有できる）
   }
 
+  // ここまで来たら「接続完了」として購読開始
+  isConnected = true;
+  uid = auth.currentUser?.uid || uid;
+  el("whoami").textContent = displayName;
+  stopRealtime = startRealtime();
+
   setStatus("接続", true);
   setListMsg("同期中（リアルタイム）…");
 }
 
 async function disconnect(){
   if(!auth) return;
+  if(stopRealtime){
+    stopRealtime();
+    stopRealtime = null;
+  }
+  isConnected = false;
   await signOut(auth);
   uid = null;
   setStatus("未接続", false);
@@ -522,7 +546,17 @@ function startRealtime(){
       snap.docs.forEach(d => membersByUid.set(d.id, d.data().displayName || d.id));
       rerenderFromState();
     },
-    (err) => setListMsg("取得に失敗: " + err.message, true)
+    (err) => {
+      // members がルールで許可されていない場合でも、明細自体は表示できるようにする
+      // （表示名がUIDになるだけ）。
+      if(String(err?.code || "").includes("permission-denied")){
+        membersByUid.clear();
+        // ここでは強いエラー表示を出さない
+        rerenderFromState();
+        return;
+      }
+      setListMsg("取得に失敗: " + err.message, true);
+    }
   );
 
   // 初回は選択月に基づいて where してもよいが、簡便のため household の全明細を購読（小規模想定）
@@ -572,22 +606,17 @@ wireUI();
 onAuthStateChanged(getAuthSafe(), async (user) => {
   if(!user){
     setStatus("未接続", false);
+    isConnected = false;
     return;
   }
   uid = user.uid;
   displayName = (el("displayName").value || user.displayName || "あなた").trim();
   el("whoami").textContent = displayName;
 
-  setStatus("接続済み", true);
-
-  householdId = normalizeHouseholdId(el("householdId").value);
-  if(!householdId){
-    setListMsg("世帯コードを入力してください。", true);
-    return;
+  // Realtime購読は connect() 側で開始する
+  if(isConnected){
+    setStatus("接続済み", true);
   }
-
-  if(stopRealtime) stopRealtime();
-  stopRealtime = startRealtime();
 });
 
 function getAuthSafe(){
