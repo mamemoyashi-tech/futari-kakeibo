@@ -5,7 +5,7 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
-  getFirestore, collection, doc, setDoc, addDoc, deleteDoc,
+  initializeFirestore, getFirestore, collection, doc, setDoc, addDoc, deleteDoc,
   onSnapshot, query, orderBy, Timestamp, enableIndexedDbPersistence, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
@@ -39,9 +39,7 @@ function updateCategoryChart(rows){
   const canvas = el("categoryPie");
   const list = el("categoryList");
   const totalEl = el("chartTotal");
-  if(!canvas || !list || typeof Chart === "undefined"){
-    return; // Chart.js 未読込など
-  }
+  if(!canvas || !list || !totalEl) return;
 
   // カテゴリ別合計
   const m = new Map();
@@ -103,12 +101,78 @@ function updateCategoryChart(rows){
     }
   };
 
+  // Chart.js が読めない環境（PWA/オフライン/ネットワーク制限等）でも
+  // 最低限の円グラフを表示できるようフォールバックする。
+  if(typeof Chart === "undefined"){
+    drawPieFallback(canvas, labels, values, data.datasets[0].backgroundColor, total);
+    return;
+  }
+
   if(!pieChart){
     pieChart = new Chart(canvas, { type: "pie", data, options });
   }else{
     pieChart.data = data;
     pieChart.update();
   }
+}
+
+function drawPieFallback(canvas, labels, values, colors, total){
+  const ctx = canvas.getContext("2d");
+  if(!ctx) return;
+
+  // 高DPI対応
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if(canvas.width !== w) canvas.width = w;
+  if(canvas.height !== h) canvas.height = h;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.scale(dpr, dpr);
+
+  const cw = rect.width;
+  const ch = rect.height;
+  ctx.clearRect(0,0,cw,ch);
+
+  if(!total || total <= 0 || values.length === 0){
+    ctx.fillStyle = "#4b6a54";
+    ctx.font = "600 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("データがありません", cw/2, ch/2);
+    return;
+  }
+
+  const cx = cw/2;
+  const cy = ch/2;
+  const r = Math.min(cw, ch) * 0.42;
+
+  let angle = -Math.PI/2;
+  for(let i=0;i<values.length;i++){
+    const v = values[i] || 0;
+    const a = (v/total) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, angle, angle + a);
+    ctx.closePath();
+    ctx.fillStyle = colors[i] || "#2F7D4C";
+    ctx.fill();
+    // 白い境界線
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#ffffff";
+    ctx.stroke();
+    angle += a;
+  }
+
+  // 中央に合計
+  ctx.fillStyle = "#0f1a12";
+  ctx.font = "800 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("合計", cx, cy - 10);
+  ctx.fillStyle = "#1f5a37";
+  ctx.font = "800 16px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.fillText(fmtYen(total), cx, cy + 12);
 }
 
 
@@ -155,8 +219,27 @@ function setListMsg(msg, isError=false){
 function ensureFirebaseInitialized(){
   if(app) return;
   app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
+  // iOS/Safari（PWAのスタンドアロン含む）で Firestore の接続が不安定になる場合があるため、
+  // 長輪講（Long Polling）を強制して安定性を上げる。
+  // 参考: Firestore の既知の互換性問題（WebChannel / Fetch Streams 等）。
+  try{
+    db = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+      useFetchStreams: false,
+    });
+  }catch{
+    // initializeFirestore が二重初期化などで失敗した場合のフォールバック
+    db = getFirestore(app);
+  }
   auth = getAuth(app);
+
+  // オフライン永続化（対応ブラウザのみ）。失敗しても動作は継続。
+  // ※複数タブ同時利用などで precondition になることがあります。
+  enableIndexedDbPersistence(db).catch(() => {});
+}
+
+function monthRange(yyyymm){
+  return getMonthBounds(yyyymm);
 }
 
 function saveLocal(){
