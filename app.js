@@ -27,6 +27,91 @@ let uid = null;
 let householdId = null;
 let displayName = null;
 
+let pieChart = null;
+
+// Moneytree風カラー（緑中心 + 水色アクセント）
+const PIE_COLORS = [
+  "#2F7D4C", "#47BCD0", "#1F5A37", "#6AD1C4", "#4B6A54", "#9FE3EA",
+  "#7CCBA2", "#2A9D8F", "#A7E0C2", "#5FBF7A"
+];
+
+function updateCategoryChart(rows){
+  const canvas = el("categoryPie");
+  const list = el("categoryList");
+  const totalEl = el("chartTotal");
+  if(!canvas || !list || typeof Chart === "undefined"){
+    return; // Chart.js 未読込など
+  }
+
+  // カテゴリ別合計
+  const m = new Map();
+  let total = 0;
+  for(const r of rows){
+    const cat = (r.category || "その他").toString();
+    const amt = Number(r.amount || 0);
+    total += amt;
+    m.set(cat, (m.get(cat) || 0) + amt);
+  }
+
+  const entries = [...m.entries()].sort((a,b)=> b[1]-a[1]);
+  const labels = entries.map(e=>e[0]);
+  const values = entries.map(e=>e[1]);
+
+  totalEl.textContent = `合計: ${fmtYen(total)}`;
+
+  // 右側のリスト
+  list.innerHTML = "";
+  if(entries.length === 0){
+    list.innerHTML = '<div class="muted small">データがありません</div>';
+  }else{
+    entries.forEach(([cat, amt], i) => {
+      const row = document.createElement("div");
+      row.className = "catRow";
+      row.innerHTML = `
+        <div class="catName"><span class="dot" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>${escapeHtml(cat)}</div>
+        <div class="catAmt">${fmtYen(amt)}</div>
+      `;
+      list.appendChild(row);
+    });
+  }
+
+  // 円グラフ
+  const data = {
+    labels,
+    datasets: [{
+      data: values,
+      backgroundColor: labels.map((_, i)=> PIE_COLORS[i % PIE_COLORS.length]),
+      borderColor: "#ffffff",
+      borderWidth: 2,
+    }]
+  };
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => {
+            const v = ctx.parsed || 0;
+            const pct = total > 0 ? Math.round((v/total)*100) : 0;
+            return `${ctx.label}: ${fmtYen(v)} (${pct}%)`;
+          }
+        }
+      }
+    }
+  };
+
+  if(!pieChart){
+    pieChart = new Chart(canvas, { type: "pie", data, options });
+  }else{
+    pieChart.data = data;
+    pieChart.update();
+  }
+}
+
+
 const el = (id) => document.getElementById(id);
 const fmtYen = (n) => `${Math.round(n).toLocaleString("ja-JP")}円`;
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -310,40 +395,23 @@ async function addExpense(){
   }
 }
 
+
 function startRealtime(){
   // members 取得（表示名）
   const membersByUid = new Map();
+  let allRows = [];
 
-  const unsubMembers = onSnapshot(
-    collection(db, "households", householdId, "members"),
-    (snap) => {
-      membersByUid.clear();
-      snap.docs.forEach(d => membersByUid.set(d.id, d.data().displayName || d.id));
-    }
-  );
+  const rerenderFromState = () => {
+    const month = el("monthSelect").value;
+    const { start, end } = monthRange(month);
 
-  // 月の候補（直近12ヶ月 + 明細に存在する月）
-  const now = new Date();
-  const preset = [];
-  for(let i=0;i<12;i++){
-    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-    preset.push(yyyymmFromDate(d));
-  }
-  updateMonthSelect(preset);
+    const filtered = allRows.filter(r => {
+      const dt = r.date?.toDate ? r.date.toDate() : null;
+      if(!dt) return false;
+      return dt >= start && dt < end;
+    });
 
-  const rerender = (snap) => {
-    const selMonth = el("monthSelect").value || yyyymmFromDate(new Date());
-    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    // 月候補の拡張
-    const monthsInData = [...new Set(rows.map(r => r.yyyymm).filter(Boolean))].sort().reverse();
-    const merged = [...new Set([...monthsInData, ...preset])];
-    updateMonthSelect(merged);
-
-    // 選択月でフィルタ
-    const filtered = rows.filter(r => r.yyyymm === selMonth);
-    filtered.sort((a,b) => (a.date?.seconds||0) - (b.date?.seconds||0));
-
-    // 合計
+    // 合計（2人前提）
     let my = 0, other = 0;
     for(const r of filtered){
       if(r.payerUid === uid) my += (r.amount||0);
@@ -354,23 +422,55 @@ function startRealtime(){
     el("otherTotal").textContent = fmtYen(other);
     el("settlement").textContent = computeSettlement(my, other).text;
 
+    // 円グラフ（カテゴリ別）
+    updateCategoryChart(filtered);
+
+    // 明細
     renderTable(filtered, membersByUid);
 
     if(filtered.length === 0) setListMsg("この月の明細はまだありません。");
     else setListMsg(`${filtered.length} 件`);
   };
 
+  const unsubMembers = onSnapshot(
+    collection(db, "households", householdId, "members"),
+    (snap) => {
+      membersByUid.clear();
+      snap.docs.forEach(d => membersByUid.set(d.id, d.data().displayName || d.id));
+      rerenderFromState();
+    },
+    (err) => setListMsg("取得に失敗: " + err.message, true)
+  );
+
   // 初回は選択月に基づいて where してもよいが、簡便のため household の全明細を購読（小規模想定）
   // 大量になる場合は、monthSelect変更時に購読を切り替える実装にしてください。
   const qAll = query(getExpensesCol(), orderBy("date", "asc"));
-  const unsubExpenses = onSnapshot(qAll, rerender, (err) => setListMsg("取得に失敗: " + err.message, true));
+  const unsubExpenses = onSnapshot(
+    qAll,
+    (snap) => {
+      allRows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // 利用月候補更新（データがある月 + 当月）
+      const months = new Set([yyyymmFromDate(new Date())]);
+      for(const r of allRows){
+        const dt = r.date?.toDate ? r.date.toDate() : null;
+        if(dt) months.add(yyyymmFromDate(dt));
+      }
+      const monthList = [...months].sort().reverse();
+      updateMonthSelect(monthList);
+      // 初期選択が空なら最新月
+      if(!el("monthSelect").value) el("monthSelect").value = monthList[0] || yyyymmFromDate(new Date());
 
-  // monthSelect 変更で再計算だけ（購読データは上記で保持）
-  el("monthSelect").addEventListener("change", () => { /* onSnapshot rerender が最新 snap で走るため、btnRefreshで再描画 */ });
-  el("btnRefresh").addEventListener("click", () => { /* no-op: snap更新待ち */ });
+      rerenderFromState();
+    },
+    (err) => setListMsg("取得に失敗: " + err.message, true)
+  );
+
+  el("monthSelect").addEventListener("change", rerenderFromState);
+  el("btnRefresh").addEventListener("click", rerenderFromState);
 
   return () => { unsubExpenses(); unsubMembers(); };
 }
+
 
 let stopRealtime = null;
 
