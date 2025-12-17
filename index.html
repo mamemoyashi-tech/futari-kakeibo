@@ -5,47 +5,69 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ふたり家計簿（割り勘精算）</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <meta name="theme-color" content="#ffffff">
+  <meta name="theme-color" content="#f3faf5">
   <style>
-    :root{ --bg:#f6f6f6; --card:#fff; --text:#111; --muted:#666; --border:#e7e7e7; }
-    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color:var(--text); background:var(--bg); }
-    header{ padding:16px 14px; display:flex; gap:10px; align-items:center; justify-content:space-between; position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--border); }
+    :root{
+      --bg:#f3faf5;
+      --surface:#ffffff;
+      --surface2:#f6fff9;
+      --text:#0f1a12;
+      --muted:#4b6a54;
+      --border:#d7e8dd;
+      --primary:#2f7d4c;
+      --primary2:#1f5a37;
+      --primarySoft:#dff3e7;
+      --danger:#b00020;
+      --shadow: 0 10px 30px rgba(13,40,23,0.08);
+    }
+    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color:var(--text); background: radial-gradient(1200px 500px at 20% -10%, rgba(47,125,76,0.18), transparent 60%), var(--bg); }
+    header{ position:sticky; top:0; z-index:10; padding:16px 14px; display:flex; gap:10px; align-items:center; justify-content:space-between; background:rgba(243,250,245,0.85); backdrop-filter: blur(10px); border-bottom:1px solid var(--border); }
     h1{ font-size:16px; margin:0; }
     main{ max-width:980px; margin:0 auto; padding:14px; display:grid; gap:12px; }
     .row{ display:grid; gap:12px; grid-template-columns: 1fr; }
     @media (min-width: 900px){ .row{ grid-template-columns: 1.1fr 0.9fr; } }
-    .card{ background:var(--card); border:1px solid var(--border); border-radius:16px; padding:14px; box-shadow: 0 1px 0 rgba(0,0,0,0.03); }
+    .card{ background: linear-gradient(180deg, var(--surface) 0%, var(--surface2) 100%); border:1px solid var(--border); border-radius:18px; padding:16px; box-shadow: var(--shadow); }
     label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
-    input, select, button, textarea{ width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:12px; padding:10px 12px; font-size:14px; background:#fff; }
+    input, select, button, textarea{ width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:14px; padding:10px 12px; font-size:14px; background:rgba(255,255,255,0.9); color:var(--text);} input:focus, select:focus, textarea:focus{ outline: none; border-color: rgba(47,125,76,0.55); box-shadow: 0 0 0 4px rgba(47,125,76,0.12);} 
     input[type="date"]{ padding:9px 12px; }
     button{ cursor:pointer; font-weight:600; }
-    button.primary{ border:0; padding:11px 12px; }
+    button.primary{ border:0; padding:11px 12px; background: linear-gradient(180deg, var(--primary) 0%, var(--primary2) 100%); color:white; box-shadow: 0 8px 18px rgba(31,90,55,0.18);} button.primary:hover{ filter: brightness(1.03);} button.primary:active{ transform: translateY(1px);} 
     .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
     .grid3{ display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; }
     .muted{ color:var(--muted); font-size:12px; }
-    .pill{ display:inline-block; padding:4px 10px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:#fff; }
+    .pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:rgba(255,255,255,0.8); }
     .flex{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
     table{ width:100%; border-collapse:collapse; }
     th, td{ border-bottom:1px solid var(--border); padding:10px 6px; text-align:left; font-size:13px; vertical-align:top; }
     th{ color:var(--muted); font-weight:600; }
     .right{ text-align:right; }
-    .danger{ color:#b00020; }
-    .ok{ color:#0b6b0b; }
+    .danger{ color:var(--danger); }
+    .ok{ color: var(--primary2); }
     .small{ font-size:12px; }
     .nowrap{ white-space:nowrap; }
     .actions{ display:flex; gap:8px; }
     .actions button{ width:auto; padding:8px 10px; font-size:12px; }
     details summary{ cursor:pointer; }
     code{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
-  </style>
+  
+    .sectionTitle{ font-weight:800; font-size:13px; letter-spacing: .02em; margin:0 0 10px 0; }
+    .divider{ height:1px; background:var(--border); margin:12px 0; }
+</style>
 </head>
 <body>
   <header>
-    <div>
-      <h1>ふたり家計簿（割り勘精算）</h1>
-      <div class="muted">各自が支出を入力 → 月ごとに集計 → 精算額を自動計算</div>
+    <div style="display:flex; gap:12px; align-items:center;">
+      <div style="width:34px; height:34px; border-radius:12px; background:var(--primarySoft); border:1px solid var(--border); display:flex; align-items:center; justify-content:center;">
+        <span style="font-weight:800; color:var(--primary2);">￥</span>
+      </div>
+      <div>
+        <h1 style="font-size:16px; margin:0;">ふたり家計簿（割り勘精算）</h1>
+        <div class="muted">各自が支出を入力 → 月ごとに集計 → 精算額を自動計算</div>
+      </div>
     </div>
-    <div class="pill" id="statusPill">未接続</div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <div class="pill" id="statusPill">未接続</div>
+    </div>
   </header>
 
   <main>

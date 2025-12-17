@@ -6,7 +6,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getFirestore, collection, doc, setDoc, addDoc, deleteDoc,
-  onSnapshot, query, orderBy, where, Timestamp
+  onSnapshot, query, orderBy, Timestamp, enableIndexedDbPersistence, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
   getAuth, signInAnonymously, onAuthStateChanged, signOut, updateProfile
@@ -14,12 +14,12 @@ import {
 
 // TODO: Firebase Console の Web SDK 設定を貼り付けてください
 const firebaseConfig = {
-  apiKey: "AIzaSyAxX6o56a5rzQvT33rQXIldIor9YpQzXno",
-  authDomain: "futari-kakeibo-4c32c.firebaseapp.com",
-  projectId: "futari-kakeibo-4c32c",
-  storageBucket: "futari-kakeibo-4c32c.firebasestorage.app",
-  messagingSenderId: "723945894846",
-  appId: "1:723945894846:web:d8a17f0aae8bbf25323fef"
+  apiKey: "REPLACE_ME",
+  authDomain: "REPLACE_ME",
+  projectId: "REPLACE_ME",
+  storageBucket: "REPLACE_ME",
+  messagingSenderId: "REPLACE_ME",
+  appId: "REPLACE_ME"
 };
 
 let app, db, auth;
@@ -86,10 +86,26 @@ function loadLocal(){
   el("displayName").value = name;
 }
 
-async function connect(){
-  ensureFirebaseInitialized();
+function normalizeHouseholdId(raw){
+  // 共有IDはちょっとした違い（空白/全角）で別世帯になりがちなので正規化
+  return (raw || "")
+    .trim()
+    .replace(/[\s\u3000]+/g, "") // 半角/全角スペース除去
+    .toLowerCase();
+}
 
-  householdId = (el("householdId").value || "").trim();
+
+
+async function connect(){
+  try{
+    ensureFirebaseInitialized();
+  }catch(e){
+    setAddMsg(e.message, true);
+    setStatus("未接続", false);
+    return;
+  }
+
+  householdId = normalizeHouseholdId(el("householdId").value);
   displayName = (el("displayName").value || "").trim();
 
   if(!householdId || householdId.length < 4){
@@ -100,12 +116,21 @@ async function connect(){
     setAddMsg("表示名を入力してください。", true);
     return;
   }
+
+  // UI の入力欄も正規化後で揃える（2人で微妙に違う入力を防ぐ）
+  el("householdId").value = householdId;
   saveLocal();
 
   setAddMsg("");
   setStatus("接続中…", true);
 
-  await signInAnonymously(auth);
+  try{
+    await signInAnonymously(auth);
+  }catch(e){
+    setStatus("未接続", false);
+    setAddMsg("ログインに失敗しました: " + e.message, true);
+    return;
+  }
 
   // profile（匿名でもdisplayNameは持てます）
   try{
@@ -116,13 +141,20 @@ async function connect(){
 
   // members に表示名を保存（任意）
   try{
-    await setDoc(doc(db, "households", householdId, "members", auth.currentUser.uid), {
-      displayName,
-      updatedAt: Timestamp.now()
-    }, { merge: true });
+    const myUid = auth.currentUser?.uid;
+    if(myUid){
+      await setDoc(
+        doc(db, "households", householdId, "members", myUid),
+        { displayName, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+    }
   }catch(e){
-    // 無視しても動く
+    // 無視しても動く（権限設定等で失敗しても、expenses 自体は共有できる）
   }
+
+  setStatus("接続", true);
+  setListMsg("同期中（リアルタイム）…");
 }
 
 async function disconnect(){
@@ -365,7 +397,7 @@ onAuthStateChanged(getAuthSafe(), async (user) => {
 
   setStatus("接続済み", true);
 
-  householdId = (el("householdId").value || "").trim();
+  householdId = normalizeHouseholdId(el("householdId").value);
   if(!householdId){
     setListMsg("世帯コードを入力してください。", true);
     return;
