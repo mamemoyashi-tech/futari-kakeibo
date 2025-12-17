@@ -14,12 +14,12 @@ import {
 
 // TODO: Firebase Console の Web SDK 設定を貼り付けてください
 const firebaseConfig = {
-  apiKey: "REPLACE_ME",
-  authDomain: "REPLACE_ME",
-  projectId: "REPLACE_ME",
-  storageBucket: "REPLACE_ME",
-  messagingSenderId: "REPLACE_ME",
-  appId: "REPLACE_ME"
+  apiKey: "AIzaSyAxX6o56a5rzQvT33rQXIldIor9YpQzXno",
+  authDomain: "futari-kakeibo-4c32c.firebaseapp.com",
+  projectId: "futari-kakeibo-4c32c",
+  storageBucket: "futari-kakeibo-4c32c.firebasestorage.app",
+  messagingSenderId: "723945894846",
+  appId: "1:723945894846:web:d8a17f0aae8bbf25323fef"
 };
 
 let app, db, auth;
