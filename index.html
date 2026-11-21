@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ふたり家計簿（割り勘精算）</title>
-  <link rel="manifest" href="manifest.webmanifest?v=20261121-sage-notes">
+  <link rel="manifest" href="manifest.webmanifest?v=20261121-mobile-swipe">
   <meta name="theme-color" content="#F7F9F3">
   <style>
     :root{--bg:#F7F9F3;--surface:#FFFFFF;--surface2:#EAF2E6;--text:#3E5545;--muted:#657563;--border:#DFE8DA;--primary:#D4E5D4;--primary2:#BFD6BF;--primarySoft:#EAF2E6;--accent:#F5D7BF;--accentSoft:#FBECE0;--highlight:#F3E9BB;--danger:#9B4F4F;--dangerSoft:#FBE9E5;--warning:#755E2F;--shadow:0 6px 24px rgba(62,85,69,.05)}
     *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+    body{touch-action:pan-y pinch-zoom;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
     button,input,select,textarea{font:inherit;color:inherit}
     header{border-bottom:1px solid var(--border);background:var(--surface)}
     .headerInner{max-width:1180px;margin:auto;padding:18px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px}
@@ -21,7 +21,8 @@
     main{max-width:1180px;margin:0 auto;padding:0 28px 48px;display:grid;gap:20px}
     .intro{max-width:1180px;margin:0 auto;padding:30px 28px 20px;display:flex;justify-content:space-between;align-items:end;gap:16px}
     .eyebrow{color:var(--muted);font-size:10px;font-weight:750;letter-spacing:.18em;margin-bottom:6px}
-    .intro h2{font-family:"Yu Mincho","Hiragino Mincho ProN",serif;font-size:28px;letter-spacing:.06em;font-weight:600;margin:0}
+    .intro>div{min-width:0;width:100%}
+    .intro h2{white-space:nowrap;font-family:"Yu Mincho","Hiragino Mincho ProN",serif;font-size:28px;letter-spacing:.06em;font-weight:600;margin:0}
     .intro p{font-size:12px;color:var(--muted);margin:8px 0 0}
     .screenTabs{display:flex;gap:4px;max-width:1124px;margin:0 auto 20px;border-bottom:1px solid var(--border);padding:0}
     .screenTabs button{width:auto;min-width:140px;border:0;border-radius:0;background:none;padding:13px 20px;color:var(--muted);position:relative;min-height:48px}
@@ -98,11 +99,12 @@
     #sharedNote{min-height:45vh;resize:vertical;line-height:2;font-size:16px;background:repeating-linear-gradient(transparent,transparent 31px,var(--border) 31px,var(--border) 32px);background-attachment:local;border:0;border-radius:0;padding:8px 0}
     #noteStatus{margin:18px 0 0;padding-top:12px;border-top:1px solid var(--border)}
     #notesEmpty{padding:32px 16px;text-align:center;border:1px dashed var(--border);border-radius:12px}
+    .intro,.screenTabs,.entryCard,.connectionCard,#notesPanel,.summaryCard>.flex,.totals,.settlementCard,.cardInset{touch-action:pan-y pinch-zoom}
     .screenPanel{min-width:0;animation:reveal .18s ease-out}[hidden]{display:none!important}
     @keyframes reveal{from{opacity:.5;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
     @media(min-width:1000px){#budgetPanel{grid-template-columns:340px minmax(0,1fr)}.entryCard{grid-column:1;grid-row:1}.summaryCard{grid-column:2;grid-row:1/span 2}.connectionCard{grid-column:1;grid-row:2}}
     @media(max-width:1180px){.screenTabs,.swipeHint{margin-left:28px;margin-right:28px}}
-    @media(max-width:600px){.headerInner{padding:14px 18px}.brandSub{font-size:9px}h1{font-size:17px}.intro{padding:24px 18px 18px}.intro h2{font-size:23px}.intro p{font-size:11px}.screenTabs{margin:0 18px 16px}.screenTabs button{flex:1;min-width:0;padding:12px}.swipeHint{margin:-8px 20px 16px}main{padding:0 14px 32px;gap:14px}.card{padding:20px 16px;border-radius:16px}#budgetPanel{gap:16px!important}.sectionHeading{font-size:17px}.chartGrid{grid-template-columns:1fr}.chartWrap{height:250px;max-width:300px;width:100%;margin:auto}.totals>div{padding:14px 12px}.notesList{grid-template-columns:1fr}.noteItem{min-height:120px}.settlementCard{padding:18px 16px}#settlement{font-size:18px!important}.connectionCard .grid2{grid-template-columns:1fr}.notesHeading .primary{font-size:12px}.actions{width:100%;margin-top:4px}.actions select{flex:1}}
+    @media(max-width:600px){.headerInner{padding:14px 18px}.brandSub{font-size:9px}h1{font-size:17px}.intro{padding:24px 18px 18px}.intro h2{font-size:clamp(14px,4.3vw,23px);letter-spacing:.02em}.intro p{font-size:11px}.screenTabs{margin:0 18px 16px}.screenTabs button{flex:1;min-width:0;padding:12px}.swipeHint{margin:-8px 20px 16px}main{padding:0 14px 32px;gap:14px}.card{padding:20px 16px;border-radius:16px}#budgetPanel{gap:16px!important}.sectionHeading{font-size:17px}.chartGrid{grid-template-columns:1fr}.chartWrap{height:250px;max-width:300px;width:100%;margin:auto}.totals>div{padding:14px 12px}.notesList{grid-template-columns:1fr}.noteItem{min-height:120px}.settlementCard{padding:18px 16px}#settlement{font-size:18px!important}.connectionCard .grid2{grid-template-columns:1fr}.notesHeading .primary{font-size:12px}.actions{width:100%;margin-top:4px}.actions select{flex:1}}
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 
     /* Native controls and selection must not fall back to browser blue. */
@@ -307,7 +309,7 @@
 </main>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="app.js?v=20261121-sage-notes"></script>
+  <script type="module" src="app.js?v=20261121-mobile-swipe"></script>
 </body>
 </html>
 
