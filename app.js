@@ -543,8 +543,7 @@ function startRealtime(){
     else setListMsg(`${filtered.length} 件`);
   };
 
-  el("monthSelect").addEventListener("change", rerenderFromState);
-  el("btnRefresh").addEventListener("click", rerenderFromState);
+
   const unsubMembers = onSnapshot(
     collection(db, "households", householdId, "members"),
     (snap) => {
@@ -697,11 +696,11 @@ function reconcileSelectedNote(){
   if(noteSaving) return;
   if(!latestNote || latestNote.deleted){
     // Keep the local editor visible so the user can copy text after a remote deletion.
-    noteMessage("相手がこのメモを削除しました。入力内容をコピーして、新しいメモとして保存してください。", "warning", "warning");
+    noteMessage("相手がこのメモを削除しました。入力内容をコピーして、新しいメモとして保存してください。", "warning");
     el("btnReloadNote").hidden = false;
   }else if(noteDirty){
     if((latestNote.revision || 0) !== noteRevision){
-      noteMessage("相手が更新しました。入力内容をコピーしてから最新メモを読み込んでください。", "warning", "warning");
+      noteMessage("相手が更新しました。入力内容をコピーしてから最新メモを読み込んでください。", "warning");
       el("btnReloadNote").hidden = false;
     }
   }else{ applyNote(latestNote); }
@@ -721,7 +720,7 @@ function startNotes(){
   }, error => {
     if(session !== noteSession) return;
     noteReady = false; noteButtons();
-    noteMessage(error.code === "permission-denied" ? "共有メモにアクセスできません。メモの共有設定を確認してください。" : "共有メモを取得できませんでした。再接続してください。", "error", "error");
+    noteMessage(error.code === "permission-denied" ? "共有メモにアクセスできません。メモの共有設定を確認してください。" : "共有メモを取得できませんでした。再接続してください。", "error");
   });
 }
 async function saveNote(){
@@ -753,7 +752,7 @@ async function saveNote(){
     noteMessage(noteDirty ? "保存しました。続けて入力した変更は未保存です。" : "保存して共有しました。");
   }catch(error){
     if(session !== noteSession) return;
-    noteMessage(error.message === "note-conflict" ? "相手の更新または削除があるため保存しませんでした。入力内容をコピーしてから最新メモを確認してください。" : "保存できませんでした。入力内容は残っています。接続や共有設定を確認してください。", error.message === "note-conflict" ? "warning" : "error", error.message === "note-conflict" ? "warning" : "error");
+    noteMessage(error.message === "note-conflict" ? "相手の更新または削除があるため保存しませんでした。入力内容をコピーしてから最新メモを確認してください。" : "保存できませんでした。入力内容は残っています。接続や共有設定を確認してください。", error.message === "note-conflict" ? "warning" : "error");
     if(error.message === "note-conflict") el("btnReloadNote").hidden = false;
   }finally{
     if(session === noteSession){noteSaving=false;noteButtons();reconcileSelectedNote();}
@@ -777,7 +776,7 @@ async function deleteNote(){
     noteSaving=false;noteDirty=false;backToNotes();noteMessage("削除しました。");
   }catch(error){
     if(session !== noteSession) return;
-    noteMessage(error.message === "note-conflict" ? "相手が変更したため削除しませんでした。最新メモを確認してください。" : "削除できませんでした。再度お試しください。", error.message === "note-conflict" ? "warning" : "error", error.message === "note-conflict" ? "warning" : "error");
+    noteMessage(error.message === "note-conflict" ? "相手が変更したため削除しませんでした。最新メモを確認してください。" : "削除できませんでした。再度お試しください。", error.message === "note-conflict" ? "warning" : "error");
     if(error.message === "note-conflict") el("btnReloadNote").hidden=false;
   }finally{if(session === noteSession){noteSaving=false;noteButtons();}}
 }
