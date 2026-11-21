@@ -798,31 +798,49 @@ function wireNotes(){
       }
     });
   });
-  let gesture = null;
-  const area = el("screenArea");
-  area.addEventListener("touchstart", event => {
+  let gesture = null, suppressClickUntil = 0;
+  // Listen across the page, including the heading, chart and memo cards.
+  // Native form editing and horizontally scrolling containers keep their gestures.
+  document.addEventListener("touchstart", event => {
     gesture = null;
-    if(event.touches.length !== 1 || event.target.closest("input,textarea,select,button,a,canvas,[contenteditable]")) return;
-    // 横スクロールする明細表などは操作を優先する。
-    for(let n = event.target; n && n !== area; n = n.parentElement){ if(n.scrollWidth > n.clientWidth + 2) return; }
+    if(event.touches.length !== 1) return;
+    const target = event.target;
+    if(target.closest("input,textarea,select,a,[contenteditable]:not([contenteditable='false'])")) return;
+    for(let n = target; n && n !== document.body; n = n.parentElement){
+      if(n.scrollWidth > n.clientWidth + 2 && /auto|scroll/.test(getComputedStyle(n).overflowX)) return;
+    }
     const touch = event.touches[0];
-    if(touch.clientX < 24 || touch.clientX > window.innerWidth - 24) return;
-    gesture = {x:touch.clientX,y:touch.clientY,time:Date.now()};
+    // Leave the system's edge-back gesture available.
+    if(touch.clientX < 16 || touch.clientX > window.innerWidth - 16) return;
+    gesture = {x:touch.clientX,y:touch.clientY,horizontal:false};
   }, {passive:true});
-  area.addEventListener("touchmove", event => {
+  document.addEventListener("touchmove", event => {
     if(!gesture) return;
-    if(event.touches.length !== 1 || Math.abs(event.touches[0].clientY - gesture.y) > 35) gesture = null;
-  }, {passive:true});
-  area.addEventListener("touchcancel", () => {gesture = null;}, {passive:true});
-  area.addEventListener("touchend", event => {
-    if(!gesture) return;
-    const g = gesture; gesture = null;
-    const t = event.changedTouches[0], dx = t.clientX-g.x, dy = t.clientY-g.y;
-    if(Date.now()-g.time < 700 && Math.abs(dx)>70 && Math.abs(dx)>Math.abs(dy)*2){
+    if(event.touches.length !== 1){gesture=null;return;}
+    const dx = event.touches[0].clientX-gesture.x;
+    const dy = event.touches[0].clientY-gesture.y;
+    if(!gesture.horizontal){
+      if(Math.abs(dy)>12 && Math.abs(dy)>Math.abs(dx)){gesture=null;return;}
+      if(Math.abs(dx)>12 && Math.abs(dx)>Math.abs(dy)*1.2) gesture.horizontal=true;
+    }
+    if(gesture.horizontal && event.cancelable) event.preventDefault();
+  }, {passive:false});
+  document.addEventListener("touchcancel", () => {gesture=null;}, {passive:true});
+  document.addEventListener("touchend", event => {
+    if(!gesture || !event.changedTouches.length) return;
+    const g = gesture;gesture=null;
+    const touch = event.changedTouches[0];
+    const dx = touch.clientX-g.x, dy = touch.clientY-g.y;
+    if(Math.abs(dx)>=48 && Math.abs(dx)>Math.abs(dy)*1.4){
+      // A swipe across a memo card must not also open that card on release.
+      suppressClickUntil=Date.now()+400;
       if(dx<0 && active===0) show(1);
-      if(dx>0 && active===1) show(0);
+      else if(dx>0 && active===1) show(0);
     }
   }, {passive:true});
+  document.addEventListener("click", event => {
+    if(event.detail>0 && Date.now()<suppressClickUntil){event.preventDefault();event.stopImmediatePropagation();}
+  }, true);
   for(const id of ["sharedNote","noteTitle"]){
     el(id).addEventListener("input", () => {noteDirty=true;noteButtons();noteMessage("未保存の変更があります。");});
   }
