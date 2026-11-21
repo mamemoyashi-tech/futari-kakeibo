@@ -46,11 +46,11 @@
     input::placeholder,textarea::placeholder{color:var(--muted);font-size:13px}
     input:focus,select:focus,textarea:focus{outline:none;border-color:var(--text);box-shadow:0 0 0 3px rgba(62,85,69,.12);background:var(--surface)}
     button{width:100%;min-height:44px;border:1px solid var(--border);border-radius:10px;padding:10px 14px;background:var(--surface);font-size:13px;font-weight:650;cursor:pointer;transition:background .15s,transform .15s}
-    button:hover:not(:disabled){background:var(--primarySoft)}
+    @media (hover:hover) and (pointer:fine){button:hover:not(:disabled){background:var(--primarySoft)}}
     button:active:not(:disabled){transform:translateY(1px)}
     button:focus-visible,summary:focus-visible{outline:3px solid var(--muted);outline-offset:3px}
     button.primary{background:var(--primary);border-color:var(--primary2);color:var(--text);box-shadow:none}
-    button.primary:hover:not(:disabled){background:var(--primarySoft)}
+    @media (hover:hover) and (pointer:fine){button.primary:hover:not(:disabled){background:var(--primarySoft)}}
     button.primary:active:not(:disabled){background:var(--primary2)}
     button:disabled{opacity:.48;cursor:not-allowed}
     .muted{color:var(--muted);font-size:12px}
@@ -113,6 +113,13 @@
     button{appearance:none;-webkit-appearance:none;background-image:none;-webkit-text-fill-color:currentColor}
     a,a:visited{color:var(--text)}
     ::selection{background:var(--primary);color:var(--text)}
+    /* Selection owns the tab fill; touch hover/tap feedback must not imitate selection. */
+    .screenTabs button{transition:none;-webkit-tap-highlight-color:transparent}
+    .screenTabs button[aria-selected="false"],
+    .screenTabs button[aria-selected="false"]:hover,
+    .screenTabs button[aria-selected="false"]:active,
+    .screenTabs button[aria-selected="false"]:focus{background:transparent;color:var(--muted)}
+    .screenTabs button[aria-selected="false"]::after{content:none}
     .screenTabs button[aria-selected="true"]{background:var(--primarySoft);color:var(--text)}
     input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--muted);outline-offset:2px;box-shadow:0 0 0 3px var(--primarySoft)}
   </style>
