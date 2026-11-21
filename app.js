@@ -35,10 +35,10 @@ let isConnected = false;
 
 let pieChart = null;
 
-// 暮らしのノート：深緑・真鍮・自然色で統一
+// 固定配色：淡いセージを中心に、アプリコットとバターイエローを限定使用
 const PIE_COLORS = [
-  "#315D49", "#B79965", "#82977C", "#C78064", "#7E9C9A", "#D2BE90",
-  "#596B57", "#9B8795", "#A7B9A1", "#B9A494"
+  "#D4E5D4", "#BFD6BF", "#F5D7BF", "#F3E9BB", "#EAF2E6",
+  "#FBECE0", "#D4E5D4", "#BFD6BF", "#F5D7BF", "#F3E9BB"
 ];
 
 function updateCategoryChart(rows){
@@ -141,7 +141,7 @@ function drawPieFallback(canvas, labels, values, colors, total){
   ctx.clearRect(0,0,cw,ch);
 
   if(!total || total <= 0 || values.length === 0){
-    ctx.fillStyle = "#4b6a54";
+    ctx.fillStyle = "#657563";
     ctx.font = "600 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -161,7 +161,7 @@ function drawPieFallback(canvas, labels, values, colors, total){
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, r, angle, angle + a);
     ctx.closePath();
-    ctx.fillStyle = colors[i] || "#2F7D4C";
+    ctx.fillStyle = colors[i] || "#D4E5D4";
     ctx.fill();
     // 白い境界線
     ctx.lineWidth = 2;
@@ -171,12 +171,12 @@ function drawPieFallback(canvas, labels, values, colors, total){
   }
 
   // 中央に合計
-  ctx.fillStyle = "#0f1a12";
+  ctx.fillStyle = "#3E5545";
   ctx.font = "800 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("合計", cx, cy - 10);
-  ctx.fillStyle = "#1f5a37";
+  ctx.fillStyle = "#3E5545";
   ctx.font = "800 16px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
   ctx.fillText(fmtYen(total), cx, cy + 12);
 }
@@ -206,20 +206,20 @@ function defaultDate(){
 
 function setStatus(text, ok=true){
   const pill = el("statusPill");
-  pill.textContent = text;
+  pill.textContent = ok ? text : `! ${text}`;
   pill.className = "pill " + (ok ? "ok" : "danger");
 }
 
 function setAddMsg(msg, isError=false){
   const a = el("addMsg");
-  a.textContent = msg;
-  a.className = "muted small " + (isError ? "danger" : "");
+  a.textContent = isError && msg ? `! ${msg}` : msg;
+  a.className = "muted small " + (isError ? "messageError" : "");
 }
 
 function setListMsg(msg, isError=false){
   const a = el("listMsg");
-  a.textContent = msg;
-  a.className = "muted small " + (isError ? "danger" : "");
+  a.textContent = isError && msg ? `! ${msg}` : msg;
+  a.className = "muted small " + (isError ? "messageError" : "");
 }
 
 function ensureFirebaseInitialized(){
@@ -613,7 +613,11 @@ let noteDirty = false, noteReady = false, noteSaving = false;
 let noteRevision = 0, latestNote = null, noteSession = 0;
 let selectedNoteId = null, noteIsNew = false;
 let notesById = new Map();
-function noteMessage(message){ el("noteStatus").textContent = message; }
+function noteMessage(message, kind = "info"){
+  const status = el("noteStatus");
+  status.textContent = kind === "info" ? message : `! ${message}`;
+  status.className = kind === "error" ? "messageError" : kind === "warning" ? "messageWarning" : "muted";
+}
 function noteButtons(){
   const editable = noteReady && selectedNoteId !== null;
   el("btnNewNote").disabled = !noteReady || noteSaving;
@@ -693,11 +697,11 @@ function reconcileSelectedNote(){
   if(noteSaving) return;
   if(!latestNote || latestNote.deleted){
     // Keep the local editor visible so the user can copy text after a remote deletion.
-    noteMessage("相手がこのメモを削除しました。入力内容をコピーして、新しいメモとして保存してください。");
+    noteMessage("相手がこのメモを削除しました。入力内容をコピーして、新しいメモとして保存してください。", "warning", "warning");
     el("btnReloadNote").hidden = false;
   }else if(noteDirty){
     if((latestNote.revision || 0) !== noteRevision){
-      noteMessage("相手が更新しました。入力内容をコピーしてから最新メモを読み込んでください。");
+      noteMessage("相手が更新しました。入力内容をコピーしてから最新メモを読み込んでください。", "warning", "warning");
       el("btnReloadNote").hidden = false;
     }
   }else{ applyNote(latestNote); }
@@ -717,7 +721,7 @@ function startNotes(){
   }, error => {
     if(session !== noteSession) return;
     noteReady = false; noteButtons();
-    noteMessage(error.code === "permission-denied" ? "共有メモにアクセスできません。メモの共有設定を確認してください。" : "共有メモを取得できませんでした。再接続してください。");
+    noteMessage(error.code === "permission-denied" ? "共有メモにアクセスできません。メモの共有設定を確認してください。" : "共有メモを取得できませんでした。再接続してください。", "error", "error");
   });
 }
 async function saveNote(){
@@ -725,7 +729,7 @@ async function saveNote(){
   const session = noteSession, id = selectedNoteId, isNew = noteIsNew;
   const ref = doc(db,"households",householdId,"notes",id);
   const text = el("sharedNote").value, rawTitle = el("noteTitle").value;
-  if(!rawTitle.trim() && !text.trim()){noteMessage("タイトルか本文を入力してください。");return;}
+  if(!rawTitle.trim() && !text.trim()){noteMessage("タイトルか本文を入力してください。", "warning");return;}
   const title = rawTitle.trim() || "無題のメモ";
   const revision = noteRevision, name = displayName, authorUid = uid;
   noteSaving = true;noteButtons();noteMessage("保存中…");
@@ -749,7 +753,7 @@ async function saveNote(){
     noteMessage(noteDirty ? "保存しました。続けて入力した変更は未保存です。" : "保存して共有しました。");
   }catch(error){
     if(session !== noteSession) return;
-    noteMessage(error.message === "note-conflict" ? "相手の更新または削除があるため保存しませんでした。入力内容をコピーしてから最新メモを確認してください。" : "保存できませんでした。入力内容は残っています。接続や共有設定を確認してください。");
+    noteMessage(error.message === "note-conflict" ? "相手の更新または削除があるため保存しませんでした。入力内容をコピーしてから最新メモを確認してください。" : "保存できませんでした。入力内容は残っています。接続や共有設定を確認してください。", error.message === "note-conflict" ? "warning" : "error", error.message === "note-conflict" ? "warning" : "error");
     if(error.message === "note-conflict") el("btnReloadNote").hidden = false;
   }finally{
     if(session === noteSession){noteSaving=false;noteButtons();reconcileSelectedNote();}
@@ -773,7 +777,7 @@ async function deleteNote(){
     noteSaving=false;noteDirty=false;backToNotes();noteMessage("削除しました。");
   }catch(error){
     if(session !== noteSession) return;
-    noteMessage(error.message === "note-conflict" ? "相手が変更したため削除しませんでした。最新メモを確認してください。" : "削除できませんでした。再度お試しください。");
+    noteMessage(error.message === "note-conflict" ? "相手が変更したため削除しませんでした。最新メモを確認してください。" : "削除できませんでした。再度お試しください。", error.message === "note-conflict" ? "warning" : "error", error.message === "note-conflict" ? "warning" : "error");
     if(error.message === "note-conflict") el("btnReloadNote").hidden=false;
   }finally{if(session === noteSession){noteSaving=false;noteButtons();}}
 }
