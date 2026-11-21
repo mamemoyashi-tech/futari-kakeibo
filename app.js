@@ -9,7 +9,7 @@ import {
   onSnapshot, query, orderBy, Timestamp, enableIndexedDbPersistence, serverTimestamp, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
-  getAuth, signInAnonymously, onAuthStateChanged, signOut, updateProfile
+  getAuth, signInAnonymously, onAuthStateChanged, updateProfile
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 // TODO: Firebase Console の Web SDK 設定を貼り付けてください
@@ -24,6 +24,10 @@ const firebaseConfig = {
 
 
 let app, db, auth;
+let resolveAuthReady;
+const authReady = new Promise(resolve => { resolveAuthReady = resolve; });
+let initialAuthHandled = false;
+let connecting = false, connectionEpoch = 0;
 let uid = null;
 let householdId = null;
 let displayName = null;
@@ -270,99 +274,84 @@ function normalizeHouseholdId(raw){
 
 
 
-async function connect(){
+function setConnectionMessage(message, error = false){
+  const status = el("settingsMsg");
+  status.textContent = error ? `! ${message}` : message;
+  status.className = error ? "messageError" : "muted";
+}
+function shouldAutoConnect(){
+  return localStorage.getItem("hh_autoConnect") !== "0" &&
+    normalizeHouseholdId(localStorage.getItem("hh_householdId")).length >= 4 &&
+    !!(localStorage.getItem("hh_displayName") || "").trim();
+}
+async function restoreSavedConnection(){
+  if(shouldAutoConnect()) await connect({automatic:true});
+}
+async function connect({automatic = false} = {}){
+  if(connecting) return;
+  const nextHousehold = normalizeHouseholdId(automatic ? localStorage.getItem("hh_householdId") : el("householdId").value);
+  const nextName = (automatic ? localStorage.getItem("hh_displayName") || "" : el("displayName").value || "").trim();
+  if(nextHousehold.length < 4){setConnectionMessage("世帯コードを4文字以上で入力してください。",true);return;}
+  if(!nextName){setConnectionMessage("表示名を入力してください。",true);return;}
+  if(noteDirty && !confirm("共有メモに未保存の変更があります。接続先を切り替えると変更を破棄しますか？")) return;
+  const epoch = ++connectionEpoch;
+  connecting = true;el("btnConnect").disabled = true;
+  stopNotes();
+  if(stopRealtime){stopRealtime();stopRealtime=null;}
+  isConnected = false;
+  householdId = nextHousehold;displayName = nextName;
+  setStatus(automatic ? "自動接続中…" : "接続中…",true);
+  setConnectionMessage(automatic ? "保存済みの設定で接続しています…" : "接続しています…");
   try{
     ensureFirebaseInitialized();
-  }catch(e){
-    setAddMsg(e.message, true);
-    setStatus("未接続", false);
-    return;
+    // Wait for Firebase to restore the existing anonymous identity before signing in.
+    await authReady;
+    if(epoch !== connectionEpoch) return;
+    if(!auth.currentUser) await signInAnonymously(auth);
+    if(epoch !== connectionEpoch) return;
+    const user = auth.currentUser;
+    try{await updateProfile(user,{displayName:nextName});}catch{}
+    if(epoch !== connectionEpoch) return;
+    try{
+      await setDoc(doc(db,"households",nextHousehold,"members",user.uid),
+        {displayName:nextName,updatedAt:serverTimestamp()},{merge:true});
+    }catch{}
+    if(epoch !== connectionEpoch) return;
+    uid = user.uid;
+    isConnected = true;
+    el("householdId").value = nextHousehold;
+    el("displayName").value = nextName;
+    saveLocal();localStorage.setItem("hh_autoConnect","1");
+    el("whoami").textContent = nextName;
+    stopRealtime = startRealtime();
+    setStatus("接続済み",true);
+    setConnectionMessage("接続済みです。この端末では次回から自動接続します。「切断」で自動接続も停止します。");
+    setListMsg("同期中（リアルタイム）…");
+  }catch(error){
+    if(epoch !== connectionEpoch) return;
+    isConnected = false;
+    setStatus("未接続",false);
+    setConnectionMessage("接続できませんでした。通信状況を確認して、もう一度接続してください。",true);
+  }finally{
+    if(epoch === connectionEpoch){connecting=false;el("btnConnect").disabled=false;}
   }
-
-  if(noteDirty && !confirm("共有メモに未保存の変更があります。接続先を切り替えると変更を破棄しますか？")) return;
-  stopNotes();
-  if(stopRealtime){ stopRealtime(); stopRealtime = null; }
-  isConnected = false;
-  householdId = normalizeHouseholdId(el("householdId").value);
-  displayName = (el("displayName").value || "").trim();
-
-  if(!householdId || householdId.length < 4){
-    setAddMsg("世帯コードを4文字以上で入力してください。", true);
-    return;
-  }
-  if(!displayName){
-    setAddMsg("表示名を入力してください。", true);
-    return;
-  }
-
-  // UI の入力欄も正規化後で揃える（2人で微妙に違う入力を防ぐ）
-  el("householdId").value = householdId;
-  saveLocal();
-
-  setAddMsg("");
-  setStatus("接続中…", true);
-
-  // いったん既存購読を止める（別世帯への接続切替など）
-  if(stopRealtime){
-    stopRealtime();
-    stopRealtime = null;
-  }
-  isConnected = false;
-
-  try{
-    await signInAnonymously(auth);
-  }catch(e){
-    setStatus("未接続", false);
-    setAddMsg("ログインに失敗しました: " + e.message, true);
-    return;
-  }
-
-  // profile（匿名でもdisplayNameは持てます）
-  try{
-    await updateProfile(auth.currentUser, { displayName });
-  }catch(e){
-    // 無視しても動く
-  }
-
-  // members に表示名を保存（任意）
-  try{
-    const myUid = auth.currentUser?.uid;
-    if(myUid){
-      await setDoc(
-        doc(db, "households", householdId, "members", myUid),
-        { displayName, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
-    }
-  }catch(e){
-    // 無視しても動く（権限設定等で失敗しても、expenses 自体は共有できる）
-  }
-
-  // ここまで来たら「接続完了」として購読開始
-  isConnected = true;
-  uid = auth.currentUser?.uid || uid;
-  el("whoami").textContent = displayName;
-  stopRealtime = startRealtime();
-
-  setStatus("接続", true);
-  setListMsg("同期中（リアルタイム）…");
 }
-
 async function disconnect(){
-  if(!auth) return;
   if(noteDirty && !confirm("共有メモの未保存の変更を破棄して切断しますか？")) return;
+  connectionEpoch++;
+  connecting=false;el("btnConnect").disabled=false;
+  localStorage.setItem("hh_autoConnect","0");
   stopNotes();
-  if(stopRealtime){ stopRealtime(); stopRealtime = null; }
-  isConnected = false;
-  await signOut(auth);
-  uid = null;
-  setStatus("未接続", false);
-  el("whoami").textContent = "未ログイン";
+  if(stopRealtime){stopRealtime();stopRealtime=null;}
+  isConnected=false;uid=null;
+  // Stop sharing, but retain this device's identity so its past expenses stay attributed correctly.
+  setStatus("未接続",false);
+  el("whoami").textContent="未接続";
+  setConnectionMessage("切断しました。自動接続も停止しています。再開するには「共有をはじめる」を押してください。");
   setListMsg("切断しました。");
-  el("tbody").innerHTML = "";
-  el("myTotal").textContent = "-";
-  el("otherTotal").textContent = "-";
-  el("settlement").textContent = "-";
+  el("tbody").innerHTML="";
+  el("myTotal").textContent="-";el("otherTotal").textContent="-";el("settlement").textContent="-";
+  updateCategoryChart([]);
 }
 
 function getExpensesCol(){
@@ -465,7 +454,7 @@ function initMonthSelectDefault(){
 }
 
 async function addExpense(){
-  if(!db || !uid || !householdId){
+  if(!isConnected || !db || !uid || !householdId){
     setAddMsg("先に「接続」を押してください。", true);
     return;
   }
@@ -663,7 +652,7 @@ function backToNotes(){
   applyNote(null);
   el("noteEditor").hidden = true;
   el("notesListView").hidden = false;
-  noteMessage(noteReady ? "メモを選ぶか、新しいメモを作成してください。" : "家計簿から接続してください。");
+  noteMessage(noteReady ? "メモを選ぶか、新しいメモを作成してください。" : "「設定」画面から接続してください。");
 }
 function openNote(id = null){
   if(!noteReady || !canLeaveNote()) return;
@@ -688,7 +677,7 @@ function stopNotes(){
   applyNote(null); renderNotesList();
   el("noteEditor").hidden = true;
   el("notesListView").hidden = false;
-  noteMessage("家計簿の世帯コードから接続してください。");
+  noteMessage("「設定」画面で世帯コードを入力して接続してください。");
 }
 function reconcileSelectedNote(){
   if(!selectedNoteId || noteIsNew) return;
@@ -781,8 +770,8 @@ async function deleteNote(){
   }finally{if(session === noteSession){noteSaving=false;noteButtons();}}
 }
 function wireNotes(){
-  const tabs = [el("tabBudget"), el("tabNotes")];
-  const panels = [el("budgetPanel"), el("notesPanel")];
+  const tabs = [el("tabBudget"), el("tabNotes"), el("tabSettings")];
+  const panels = [el("budgetPanel"), el("notesPanel"), el("settingsPanel")];
   let active = 0;
   function show(index, focus = false){
     active = index;
@@ -794,7 +783,7 @@ function wireNotes(){
     tab.addEventListener("click", () => show(i));
     tab.addEventListener("keydown", event => {
       if(["ArrowLeft","ArrowRight","Home","End"].includes(event.key)){
-        event.preventDefault(); show(event.key === "Home" ? 0 : event.key === "End" ? 1 : 1-active, true);
+        event.preventDefault(); show(event.key === "Home" ? 0 : event.key === "End" ? tabs.length-1 : (active + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length, true);
       }
     });
   });
@@ -834,8 +823,8 @@ function wireNotes(){
     if(Math.abs(dx)>=48 && Math.abs(dx)>Math.abs(dy)*1.4){
       // A swipe across a memo card must not also open that card on release.
       suppressClickUntil=Date.now()+400;
-      if(dx<0 && active===0) show(1);
-      else if(dx>0 && active===1) show(0);
+      if(dx<0 && active<tabs.length-1) show(active+1);
+      else if(dx>0 && active>0) show(active-1);
     }
   }, {passive:true});
   document.addEventListener("click", event => {
@@ -858,20 +847,20 @@ function wireNotes(){
 }
 wireUI();
 
-onAuthStateChanged(getAuthSafe(), async (user) => {
-  if(!user){
-    setStatus("未接続", false);
-    isConnected = false;
+onAuthStateChanged(getAuthSafe(), async user => {
+  if(!initialAuthHandled){
+    initialAuthHandled=true;
+    resolveAuthReady();
+    await restoreSavedConnection();
     return;
   }
-  uid = user.uid;
-  displayName = (el("displayName").value || user.displayName || "あなた").trim();
-  el("whoami").textContent = displayName;
-
-  // Realtime購読は connect() 側で開始する
-  if(isConnected){
-    setStatus("接続済み", true);
+  if(!user && isConnected){
+    await disconnect();
+    setConnectionMessage("接続が切れました。設定画面から再接続してください。",true);
   }
+});
+window.addEventListener("online", () => {
+  if(initialAuthHandled && !isConnected && !connecting) restoreSavedConnection();
 });
 
 function getAuthSafe(){
