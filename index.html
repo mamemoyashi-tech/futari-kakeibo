@@ -104,6 +104,15 @@
     @media(max-width:1180px){.screenTabs,.swipeHint{margin-left:28px;margin-right:28px}}
     @media(max-width:600px){.headerInner{padding:14px 18px}.brandSub{font-size:9px}h1{font-size:17px}.intro{padding:24px 18px 18px}.intro h2{font-size:23px}.intro p{font-size:11px}.screenTabs{margin:0 18px 16px}.screenTabs button{flex:1;min-width:0;padding:12px}.swipeHint{margin:-8px 20px 16px}main{padding:0 14px 32px;gap:14px}.card{padding:20px 16px;border-radius:16px}#budgetPanel{gap:16px!important}.sectionHeading{font-size:17px}.chartGrid{grid-template-columns:1fr}.chartWrap{height:250px;max-width:300px;width:100%;margin:auto}.totals>div{padding:14px 12px}.notesList{grid-template-columns:1fr}.noteItem{min-height:120px}.settlementCard{padding:18px 16px}#settlement{font-size:18px!important}.connectionCard .grid2{grid-template-columns:1fr}.notesHeading .primary{font-size:12px}.actions{width:100%;margin-top:4px}.actions select{flex:1}}
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+    /* Native controls and selection must not fall back to browser blue. */
+    :root{color-scheme:light;accent-color:var(--primary2)}
+    button,input,select,textarea{accent-color:var(--primary2);caret-color:var(--text);-webkit-tap-highlight-color:rgba(191,214,191,.4)}
+    button{appearance:none;-webkit-appearance:none;background-image:none;-webkit-text-fill-color:currentColor}
+    a,a:visited{color:var(--text)}
+    ::selection{background:var(--primary);color:var(--text)}
+    .screenTabs button[aria-selected="true"]{background:var(--primarySoft);color:var(--text)}
+    input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--muted);outline-offset:2px;box-shadow:0 0 0 3px var(--primarySoft)}
   </style>
 </head>
 <body>
