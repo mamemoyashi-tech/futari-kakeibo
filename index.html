@@ -4,7 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ふたり家計簿（割り勘精算）</title>
-  <link rel="manifest" href="manifest.webmanifest?v=20261121-settings-autoconnect">
+  <link rel="icon" type="image/png" sizes="32x32" href="sprout-favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="sprout-apple-touch.png">
+  <link rel="manifest" href="manifest.webmanifest?v=20261121-sprout-icon">
   <meta name="theme-color" content="#F7F9F3">
   <style>
     :root{--bg:#F7F9F3;--surface:#FFFFFF;--surface2:#EAF2E6;--text:#3E5545;--muted:#657563;--border:#DFE8DA;--primary:#D4E5D4;--primary2:#BFD6BF;--primarySoft:#EAF2E6;--accent:#F5D7BF;--accentSoft:#FBECE0;--highlight:#F3E9BB;--danger:#9B4F4F;--dangerSoft:#FBE9E5;--warning:#755E2F;--shadow:0 6px 24px rgba(62,85,69,.05)}
@@ -14,8 +16,8 @@
     header{border-bottom:1px solid var(--border);background:var(--surface)}
     .headerInner{max-width:1180px;margin:auto;padding:18px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px}
     .brand{display:flex;gap:12px;align-items:center;min-width:0}
-    .brandMark{width:38px;height:42px;flex-shrink:0;display:grid;place-items:center;background:var(--primary);color:var(--text);border-radius:5px 13px 13px 5px;box-shadow:inset 4px 0 #ffffff26}
-    .brandMark svg{width:22px;height:22px}
+    .brandMark{width:42px;height:42px;flex-shrink:0;display:grid;place-items:center;border-radius:12px;overflow:hidden}
+    .brandMark img{display:block;width:100%;height:100%;object-fit:cover}
     h1{margin:0;font-size:19px;letter-spacing:.08em;font-weight:750}
     .brandSub{font-size:10px;color:var(--muted);letter-spacing:.16em}
     main{max-width:1180px;margin:0 auto;padding:0 28px 48px;display:grid;gap:20px}
@@ -129,7 +131,7 @@
   <header>
     <div class="headerInner">
       <div class="brand">
-        <span class="brandMark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4h6c2 0 2 1 2 1s0-1 2-1h6v15h-6c-2 0-2 1-2 1s0-1-2-1H4zM12 5v15"/></svg></span>
+        <span class="brandMark" aria-hidden="true"><img src="sprout-icon-192.png" width="42" height="42" alt="" /></span>
         <div><h1>ふたり家計簿</h1><div class="brandSub">暮らしを、一緒につづる。</div></div>
       </div>
       <div class="pill" id="statusPill" role="status">未接続</div>
@@ -321,5 +323,3 @@
   <script type="module" src="app.js?v=20261121-settings-autoconnect"></script>
 </body>
 </html>
-
-
