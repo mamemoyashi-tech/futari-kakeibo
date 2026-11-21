@@ -35,10 +35,10 @@ let isConnected = false;
 
 let pieChart = null;
 
-// Moneytree風カラー（緑中心 + 水色アクセント）
+// 暮らしのノート：深緑・真鍮・自然色で統一
 const PIE_COLORS = [
-  "#2F7D4C", "#47BCD0", "#1F5A37", "#6AD1C4", "#4B6A54", "#9FE3EA",
-  "#7CCBA2", "#2A9D8F", "#A7E0C2", "#5FBF7A"
+  "#315D49", "#B79965", "#82977C", "#C78064", "#7E9C9A", "#D2BE90",
+  "#596B57", "#9B8795", "#A7B9A1", "#B9A494"
 ];
 
 function updateCategoryChart(rows){
@@ -857,4 +857,5 @@ function getAuthSafe(){
   ensureFirebaseInitialized();
   return auth;
 }
+
 
