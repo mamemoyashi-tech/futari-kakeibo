@@ -1,7 +1,7 @@
 const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
 let source=fs.readFileSync(require('node:path').join(__dirname,'..','app.js'),'utf8').replace(/import[\s\S]*?from "https:[^"]+";/g,'');source=source.slice(0,source.lastIndexOf('\nwireUI();'));
 const nodes=new Map();function node(){return {value:'',textContent:'',hidden:false,disabled:false,children:[],listeners:{},clientWidth:390,scrollWidth:390,append(...v){this.children.push(...v)},appendChild(v){this.children.push(v)},replaceChildren(){this.children=[]},addEventListener(k,f){(this.listeners[k]??=[]).push(f)},setAttribute(){},focus(){}}}function el(id){if(!nodes.has(id))nodes.set(id,node());return nodes.get(id)}
-const docEvents=node();const c=vm.createContext({console,getComputedStyle:n=>({overflowX:n.overflowX||'visible'}),document:{getElementById:el,createElement:node,body:node(),addEventListener:docEvents.addEventListener.bind(docEvents)},window:{innerWidth:390,addEventListener(){}},requestAnimationFrame:f=>f(),confirm:()=>true});vm.runInContext(source,c);
+const storage=new Map();const docEvents=node();const c=vm.createContext({console,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v))},getComputedStyle:n=>({overflowX:n.overflowX||'visible'}),document:{getElementById:el,createElement:node,body:node(),addEventListener:docEvents.addEventListener.bind(docEvents)},window:{innerWidth:390,addEventListener(){}},requestAnimationFrame:f=>f(),confirm:()=>true});vm.runInContext(source,c);
 vm.runInContext(`
 let server=new Map(),nextId=0,writes=0,subscription,errorCallback;
 collection=(...args)=>args;doc=(...args)=>args.length===1?{id:'note-'+(++nextId)}:args.at(-1);Timestamp={now:()=>({toMillis:()=>Date.now()})};serverTimestamp=()=>1;
@@ -30,5 +30,28 @@ touch('touchstart',250,100,heading);touch('touchmove',240,170,heading);touch('to
 const form={...heading,closest:()=>({})};touch('touchstart',250,100,form);touch('touchend',100,100,form);assert.equal(el('budgetPanel').hidden,false);
 const scroll={...heading,scrollWidth:700,overflowX:'auto'};touch('touchstart',250,100,scroll);touch('touchend',100,100,scroll);assert.equal(el('budgetPanel').hidden,false);
 console.log('PASS: heading and memo-card swipes, diagonal tolerance, vertical scroll, form controls and horizontal tables');
+// The third tab participates in both swipe and keyboard navigation.
+el('tabNotes').listeners.click[0]();touch('touchstart',260,120,heading);touch('touchmove',160,140,heading);touch('touchend',130,140,heading);assert.equal(el('settingsPanel').hidden,false);
+touch('touchstart',260,120,heading);touch('touchend',130,120,heading);assert.equal(el('settingsPanel').hidden,false);
+touch('touchstart',100,120,heading);touch('touchend',230,120,heading);assert.equal(el('notesPanel').hidden,false);
+el('tabNotes').listeners.keydown[0]({key:'End',preventDefault(){}});assert.equal(el('settingsPanel').hidden,false);
+el('tabSettings').listeners.keydown[0]({key:'Home',preventDefault(){}});assert.equal(el('budgetPanel').hidden,false);
+// Saved credentials migrate to automatic connection; the restored Firebase UID is reused.
+run(`app={};auth={currentUser:{uid:'restored-uid'}};let signIns=0,subscriptions=0;
+updateProfile=async()=>{};setDoc=async()=>{};signInAnonymously=async()=>{signIns++;auth.currentUser={uid:'new-uid'}};
+startRealtime=()=>{subscriptions++;return ()=>{}};updateCategoryChart=()=>{};noteDirty=false;
+localStorage.setItem('hh_householdId','saved-household');localStorage.setItem('hh_displayName','保存済みの名前');`);
+el('householdId').value='unsaved-edit';el('displayName').value='別の入力';
+const restoring=run('restoreSavedConnection()');assert.equal(run('subscriptions'),0);run('resolveAuthReady()');await restoring;
+assert.equal(run('isConnected'),true);assert.equal(run('uid'),'restored-uid');assert.equal(run('signIns'),0);assert.equal(el('householdId').value,'saved-household');assert.equal(storage.get('hh_autoConnect'),'1');
+await run('disconnect()');assert.equal(storage.get('hh_autoConnect'),'0');assert.equal(run('auth.currentUser.uid'),'restored-uid');assert.equal(run('isConnected'),false);
+const count=run('subscriptions');await run('restoreSavedConnection()');assert.equal(run('subscriptions'),count);
+await run('connect()');assert.equal(run('isConnected'),true);assert.equal(storage.get('hh_autoConnect'),'1');assert.equal(run('signIns'),0);
+// Cancelling an in-flight connection must not restart subscriptions later.
+run(`let releaseRegistration,enteredRegistration;
+const registrationStarted=new Promise(r=>enteredRegistration=r);
+setDoc=()=>{enteredRegistration();return new Promise(r=>releaseRegistration=r)};`);
+const connecting=run('connect()');await run('registrationStarted');await run('disconnect()');const beforeCancel=run('subscriptions');run('releaseRegistration()');await connecting;assert.equal(run('subscriptions'),beforeCancel);assert.equal(run('isConnected'),false);assert.equal(storage.get('hh_autoConnect'),'0');
+console.log('PASS: three screens, auto-connect migration, restored identity, disconnect opt-out and in-flight cancellation');
 console.log('PASS: multiple notes, separate updates, list, revision conflicts, deletion, legacy note, stale-delete protection, disconnect cleanup');
 })();
