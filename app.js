@@ -611,9 +611,20 @@ function wireUI(){
 let unsubscribeNotes = null;
 let noteDirty = false, noteReady = false, noteSaving = false;
 let noteRevision = 0, latestNote = null, noteSession = 0;
+let selectedNoteId = null, noteIsNew = false;
+let notesById = new Map();
 function noteMessage(message){ el("noteStatus").textContent = message; }
-function noteButtons(){ el("btnSaveNote").disabled = !noteReady || !noteDirty || noteSaving; }
+function noteButtons(){
+  const editable = noteReady && selectedNoteId !== null;
+  el("btnNewNote").disabled = !noteReady || noteSaving;
+  el("btnSaveNote").disabled = !editable || !noteDirty || noteSaving;
+  el("btnDeleteNote").disabled = !editable || noteIsNew || noteSaving;
+  el("btnBackNotes").disabled = noteSaving;
+  el("noteTitle").disabled = !editable;
+  el("sharedNote").disabled = !editable;
+}
 function applyNote(data){
+  el("noteTitle").value = data?.title || (data ? "共有メモ" : "");
   el("sharedNote").value = data?.text || "";
   noteRevision = data?.revision || 0;
   noteDirty = false;
@@ -621,73 +632,150 @@ function applyNote(data){
   el("noteMeta").textContent = data?.updatedByName ? `最終更新：${data.updatedByName}` : "";
   noteButtons();
 }
+function renderNotesList(){
+  const list = el("notesList");
+  list.replaceChildren();
+  const notes = [...notesById.entries()].filter(([,data]) => !data.deleted);
+  notes.sort((a,b) => (b[1].updatedAt?.toMillis?.() || 0) - (a[1].updatedAt?.toMillis?.() || 0) || a[0].localeCompare(b[0]));
+  el("notesEmpty").hidden = !noteReady || notes.length > 0;
+  for(const [id,data] of notes){
+    const button = document.createElement("button");
+    button.className = "noteItem";
+    const title = document.createElement("strong");
+    title.textContent = data.title || "共有メモ";
+    const preview = document.createElement("span");
+    preview.className = "muted";
+    preview.textContent = (data.text || "本文なし").slice(0,100);
+    button.append(title,preview);
+    button.addEventListener("click", () => openNote(id));
+    list.appendChild(button);
+  }
+}
+function canLeaveNote(){
+  return !noteSaving && (!noteDirty || confirm("未保存の変更を破棄して移動しますか？"));
+}
+function backToNotes(){
+  if(!canLeaveNote()) return;
+  selectedNoteId = null; noteIsNew = false; latestNote = null;
+  applyNote(null);
+  el("noteEditor").hidden = true;
+  el("notesListView").hidden = false;
+  noteMessage(noteReady ? "メモを選ぶか、新しいメモを作成してください。" : "家計簿から接続してください。");
+}
+function openNote(id = null){
+  if(!noteReady || !canLeaveNote()) return;
+  const data = id ? notesById.get(id) : null;
+  if(id && (!data || data.deleted)) return;
+  selectedNoteId = id || doc(collection(db,"households",householdId,"notes")).id;
+  noteIsNew = !id;
+  latestNote = data;
+  applyNote(data);
+  el("notesListView").hidden = true;
+  el("noteEditor").hidden = false;
+  noteMessage(id ? "編集後に「保存して共有」を押してください。" : "タイトルと本文を入力して保存してください。");
+  el("noteTitle").focus();
+}
 function stopNotes(){
   noteSession++;
   if(unsubscribeNotes) unsubscribeNotes();
   unsubscribeNotes = null;
   noteDirty = noteReady = noteSaving = false;
-  latestNote = null;
-  applyNote(null);
-  el("sharedNote").disabled = true;
+  selectedNoteId = null; noteIsNew = false; latestNote = null;
+  notesById = new Map();
+  applyNote(null); renderNotesList();
+  el("noteEditor").hidden = true;
+  el("notesListView").hidden = false;
   noteMessage("家計簿の世帯コードから接続してください。");
+}
+function reconcileSelectedNote(){
+  if(!selectedNoteId || noteIsNew) return;
+  latestNote = notesById.get(selectedNoteId) || null;
+  if(noteSaving) return;
+  if(!latestNote || latestNote.deleted){
+    // Keep the local editor visible so the user can copy text after a remote deletion.
+    noteMessage("相手がこのメモを削除しました。入力内容をコピーして、新しいメモとして保存してください。");
+    el("btnReloadNote").hidden = false;
+  }else if(noteDirty){
+    if((latestNote.revision || 0) !== noteRevision){
+      noteMessage("相手が更新しました。入力内容をコピーしてから最新メモを読み込んでください。");
+      el("btnReloadNote").hidden = false;
+    }
+  }else{ applyNote(latestNote); }
 }
 function startNotes(){
   stopNotes();
   const session = noteSession;
   noteMessage("共有メモを読み込み中…");
-  unsubscribeNotes = onSnapshot(doc(db, "households", householdId, "notes", "shared"), {includeMetadataChanges:true}, snap => {
+  unsubscribeNotes = onSnapshot(collection(db,"households",householdId,"notes"), {includeMetadataChanges:true}, snap => {
     if(session !== noteSession) return;
-    // キャッシュだけでは最新の内容を確認できないため編集開始を待つ。
-    if(snap.metadata.fromCache && !noteReady){ noteMessage("接続して共有メモの最新情報を確認中…"); return; }
+    if(snap.metadata.fromCache && !noteReady){noteMessage("共有メモの最新情報を確認中…");return;}
     if(snap.metadata.hasPendingWrites) return;
-    latestNote = snap.exists() ? snap.data() : null;
+    notesById = new Map(snap.docs.map(d => [d.id,d.data()]));
     noteReady = true;
-    el("sharedNote").disabled = false;
-    if(noteSaving) return;
-    if(noteDirty){
-      if((latestNote?.revision || 0) !== noteRevision){
-        noteMessage("相手が更新しました。入力中の内容は残しています。必要な部分をコピーしてから最新メモを読み込んでください。");
-        el("btnReloadNote").hidden = false;
-      }
-    }else{ applyNote(latestNote); noteMessage("ふたりで共有中。編集後に「保存して共有」を押してください。"); }
-    noteButtons();
-  }, err => {
+    renderNotesList(); noteButtons(); reconcileSelectedNote();
+    if(!selectedNoteId) noteMessage("メモを選ぶか、新しいメモを作成してください。");
+  }, error => {
     if(session !== noteSession) return;
-    noteReady = false;
-    el("sharedNote").disabled = true;
-    noteButtons();
-    noteMessage(err.code === "permission-denied" ? "共有メモへのアクセスが許可されていません。Firestoreのnotes用ルールの設定が必要です。入力内容はコピーできます。" : "共有メモを取得できませんでした。再接続してください。");
+    noteReady = false; noteButtons();
+    noteMessage(error.code === "permission-denied" ? "共有メモにアクセスできません。メモの共有設定を確認してください。" : "共有メモを取得できませんでした。再接続してください。");
   });
 }
 async function saveNote(){
-  if(!noteReady || !noteDirty || noteSaving || !isConnected) return;
-  const session = noteSession;
-  const ref = doc(db, "households", householdId, "notes", "shared");
-  const text = el("sharedNote").value;
-  const revision = noteRevision;
-  const name = displayName, authorUid = uid;
-  noteSaving = true; noteButtons(); noteMessage("保存中…");
+  if(!noteReady || !noteDirty || noteSaving || !isConnected || !selectedNoteId) return;
+  const session = noteSession, id = selectedNoteId, isNew = noteIsNew;
+  const ref = doc(db,"households",householdId,"notes",id);
+  const text = el("sharedNote").value, rawTitle = el("noteTitle").value;
+  if(!rawTitle.trim() && !text.trim()){noteMessage("タイトルか本文を入力してください。");return;}
+  const title = rawTitle.trim() || "無題のメモ";
+  const revision = noteRevision, name = displayName, authorUid = uid;
+  noteSaving = true;noteButtons();noteMessage("保存中…");
   try{
     await runTransaction(db, async transaction => {
       const snapshot = await transaction.get(ref);
-      if((snapshot.exists() ? snapshot.data().revision || 0 : 0) !== revision) throw new Error("note-conflict");
-      transaction.set(ref, {text, revision: revision+1, updatedBy: authorUid, updatedByName: name, updatedAt: serverTimestamp()});
+      if(isNew ? snapshot.exists() : !snapshot.exists() || snapshot.data().deleted || (snapshot.data().revision || 0) !== revision) throw new Error("note-conflict");
+      transaction.set(ref,{title,text,revision:revision+1,deleted:false,updatedBy:authorUid,updatedByName:name,updatedAt:serverTimestamp()});
     });
-    if(session !== noteSession) return;
-    noteRevision = revision+1;
-    if(el("sharedNote").value === text) noteDirty = false;
+    if(session !== noteSession || selectedNoteId !== id) return;
+    const known = notesById.get(id);
+    if(!known || (known.revision || 0) <= revision){
+      notesById.set(id,{title,text,revision:revision+1,deleted:false,updatedByName:name,updatedAt:Timestamp.now()});
+      renderNotesList();
+    }
+    noteIsNew = false;noteRevision = revision+1;
+    noteDirty = el("sharedNote").value !== text || el("noteTitle").value !== rawTitle;
+    if(!noteDirty) el("noteTitle").value = title;
     el("btnReloadNote").hidden = true;
     el("noteMeta").textContent = `最終更新：${name}`;
-    if(latestNote && latestNote.revision > noteRevision){
-      if(!noteDirty) applyNote(latestNote);
-      else el("btnReloadNote").hidden = false;
-    }
     noteMessage(noteDirty ? "保存しました。続けて入力した変更は未保存です。" : "保存して共有しました。");
   }catch(error){
     if(session !== noteSession) return;
-    noteMessage(error.message === "note-conflict" ? "相手の更新があるため保存しませんでした。入力内容をコピーして、最新メモを読み込んでください。" : "保存できませんでした。入力内容は残っています。接続やアクセス権限を確認して再度保存してください。");
+    noteMessage(error.message === "note-conflict" ? "相手の更新または削除があるため保存しませんでした。入力内容をコピーしてから最新メモを確認してください。" : "保存できませんでした。入力内容は残っています。接続や共有設定を確認してください。");
     if(error.message === "note-conflict") el("btnReloadNote").hidden = false;
-  }finally{if(session === noteSession){noteSaving = false;noteButtons();}}
+  }finally{
+    if(session === noteSession){noteSaving=false;noteButtons();reconcileSelectedNote();}
+  }
+}
+async function deleteNote(){
+  if(!noteReady || !selectedNoteId || noteIsNew || noteSaving || !isConnected) return;
+  if(!confirm("このメモをふたりの一覧から削除しますか？未保存の変更も破棄されます。")) return;
+  const session = noteSession, id = selectedNoteId, revision = noteRevision;
+  noteSaving=true;noteButtons();
+  try{
+    await runTransaction(db,async transaction => {
+      const ref = doc(db,"households",householdId,"notes",id);
+      const snapshot = await transaction.get(ref);
+      if(!snapshot.exists() || snapshot.data().deleted || (snapshot.data().revision || 0) !== revision) throw new Error("note-conflict");
+      // A tombstone prevents a stale editor from recreating a deleted note.
+      transaction.set(ref,{title:"",text:"",deleted:true,revision:revision+1,updatedAt:serverTimestamp(),updatedBy:uid,updatedByName:displayName});
+    });
+    if(session !== noteSession) return;
+    notesById.set(id,{deleted:true,revision:revision+1});renderNotesList();
+    noteSaving=false;noteDirty=false;backToNotes();noteMessage("削除しました。");
+  }catch(error){
+    if(session !== noteSession) return;
+    noteMessage(error.message === "note-conflict" ? "相手が変更したため削除しませんでした。最新メモを確認してください。" : "削除できませんでした。再度お試しください。");
+    if(error.message === "note-conflict") el("btnReloadNote").hidden=false;
+  }finally{if(session === noteSession){noteSaving=false;noteButtons();}}
 }
 function wireNotes(){
   const tabs = [el("tabBudget"), el("tabNotes")];
@@ -732,11 +820,18 @@ function wireNotes(){
       if(dx>0 && active===1) show(0);
     }
   }, {passive:true});
-  el("sharedNote").addEventListener("input", () => {noteDirty = true;noteButtons();noteMessage("未保存の変更があります。");});
+  for(const id of ["sharedNote","noteTitle"]){
+    el(id).addEventListener("input", () => {noteDirty=true;noteButtons();noteMessage("未保存の変更があります。");});
+  }
+  el("btnNewNote").addEventListener("click", () => openNote());
+  el("btnBackNotes").addEventListener("click", backToNotes);
   el("btnSaveNote").addEventListener("click", saveNote);
+  el("btnDeleteNote").addEventListener("click", deleteNote);
   el("btnReloadNote").addEventListener("click", () => {
-    if(noteDirty && !confirm("入力中の変更を破棄して、最新メモを読み込みますか？")) return;
-    applyNote(latestNote);noteMessage("最新メモを読み込みました。");
+    if(!canLeaveNote()) return;
+    const data = notesById.get(selectedNoteId);
+    if(!data || data.deleted){noteDirty=false;backToNotes();return;}
+    latestNote=data;applyNote(data);noteMessage("最新メモを読み込みました。");
   });
   window.addEventListener("beforeunload", event => {if(noteDirty){event.preventDefault();event.returnValue = "";}});
 }
