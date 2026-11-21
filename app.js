@@ -6,7 +6,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   initializeFirestore, getFirestore, collection, doc, setDoc, addDoc, deleteDoc,
-  onSnapshot, query, orderBy, Timestamp, enableIndexedDbPersistence, serverTimestamp
+  onSnapshot, query, orderBy, Timestamp, enableIndexedDbPersistence, serverTimestamp, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
   getAuth, signInAnonymously, onAuthStateChanged, signOut, updateProfile
@@ -279,6 +279,10 @@ async function connect(){
     return;
   }
 
+  if(noteDirty && !confirm("共有メモに未保存の変更があります。接続先を切り替えると変更を破棄しますか？")) return;
+  stopNotes();
+  if(stopRealtime){ stopRealtime(); stopRealtime = null; }
+  isConnected = false;
   householdId = normalizeHouseholdId(el("householdId").value);
   displayName = (el("displayName").value || "").trim();
 
@@ -346,10 +350,9 @@ async function connect(){
 
 async function disconnect(){
   if(!auth) return;
-  if(stopRealtime){
-    stopRealtime();
-    stopRealtime = null;
-  }
+  if(noteDirty && !confirm("共有メモの未保存の変更を破棄して切断しますか？")) return;
+  stopNotes();
+  if(stopRealtime){ stopRealtime(); stopRealtime = null; }
   isConnected = false;
   await signOut(auth);
   uid = null;
@@ -504,6 +507,7 @@ async function addExpense(){
 
 
 function startRealtime(){
+  startNotes();
   // members 取得（表示名）
   const membersByUid = new Map();
   let allRows = [];
@@ -539,6 +543,8 @@ function startRealtime(){
     else setListMsg(`${filtered.length} 件`);
   };
 
+  el("monthSelect").addEventListener("change", rerenderFromState);
+  el("btnRefresh").addEventListener("click", rerenderFromState);
   const unsubMembers = onSnapshot(
     collection(db, "households", householdId, "members"),
     (snap) => {
@@ -585,13 +591,14 @@ function startRealtime(){
   el("monthSelect").addEventListener("change", rerenderFromState);
   el("btnRefresh").addEventListener("click", rerenderFromState);
 
-  return () => { unsubExpenses(); unsubMembers(); };
+  return () => { unsubExpenses(); unsubMembers(); el("monthSelect").removeEventListener("change", rerenderFromState); el("btnRefresh").removeEventListener("click", rerenderFromState); };
 }
 
 
 let stopRealtime = null;
 
 function wireUI(){
+  wireNotes();
   el("btnConnect").addEventListener("click", connect);
   el("btnDisconnect").addEventListener("click", disconnect);
   el("btnAdd").addEventListener("click", addExpense);
@@ -601,6 +608,138 @@ function wireUI(){
   loadLocal();
 }
 
+let unsubscribeNotes = null;
+let noteDirty = false, noteReady = false, noteSaving = false;
+let noteRevision = 0, latestNote = null, noteSession = 0;
+function noteMessage(message){ el("noteStatus").textContent = message; }
+function noteButtons(){ el("btnSaveNote").disabled = !noteReady || !noteDirty || noteSaving; }
+function applyNote(data){
+  el("sharedNote").value = data?.text || "";
+  noteRevision = data?.revision || 0;
+  noteDirty = false;
+  el("btnReloadNote").hidden = true;
+  el("noteMeta").textContent = data?.updatedByName ? `最終更新：${data.updatedByName}` : "";
+  noteButtons();
+}
+function stopNotes(){
+  noteSession++;
+  if(unsubscribeNotes) unsubscribeNotes();
+  unsubscribeNotes = null;
+  noteDirty = noteReady = noteSaving = false;
+  latestNote = null;
+  applyNote(null);
+  el("sharedNote").disabled = true;
+  noteMessage("家計簿の世帯コードから接続してください。");
+}
+function startNotes(){
+  stopNotes();
+  const session = noteSession;
+  noteMessage("共有メモを読み込み中…");
+  unsubscribeNotes = onSnapshot(doc(db, "households", householdId, "notes", "shared"), {includeMetadataChanges:true}, snap => {
+    if(session !== noteSession) return;
+    // キャッシュだけでは最新の内容を確認できないため編集開始を待つ。
+    if(snap.metadata.fromCache && !noteReady){ noteMessage("接続して共有メモの最新情報を確認中…"); return; }
+    if(snap.metadata.hasPendingWrites) return;
+    latestNote = snap.exists() ? snap.data() : null;
+    noteReady = true;
+    el("sharedNote").disabled = false;
+    if(noteSaving) return;
+    if(noteDirty){
+      if((latestNote?.revision || 0) !== noteRevision){
+        noteMessage("相手が更新しました。入力中の内容は残しています。必要な部分をコピーしてから最新メモを読み込んでください。");
+        el("btnReloadNote").hidden = false;
+      }
+    }else{ applyNote(latestNote); noteMessage("ふたりで共有中。編集後に「保存して共有」を押してください。"); }
+    noteButtons();
+  }, err => {
+    if(session !== noteSession) return;
+    noteReady = false;
+    el("sharedNote").disabled = true;
+    noteButtons();
+    noteMessage(err.code === "permission-denied" ? "共有メモへのアクセスが許可されていません。Firestoreのnotes用ルールの設定が必要です。入力内容はコピーできます。" : "共有メモを取得できませんでした。再接続してください。");
+  });
+}
+async function saveNote(){
+  if(!noteReady || !noteDirty || noteSaving || !isConnected) return;
+  const session = noteSession;
+  const ref = doc(db, "households", householdId, "notes", "shared");
+  const text = el("sharedNote").value;
+  const revision = noteRevision;
+  const name = displayName, authorUid = uid;
+  noteSaving = true; noteButtons(); noteMessage("保存中…");
+  try{
+    await runTransaction(db, async transaction => {
+      const snapshot = await transaction.get(ref);
+      if((snapshot.exists() ? snapshot.data().revision || 0 : 0) !== revision) throw new Error("note-conflict");
+      transaction.set(ref, {text, revision: revision+1, updatedBy: authorUid, updatedByName: name, updatedAt: serverTimestamp()});
+    });
+    if(session !== noteSession) return;
+    noteRevision = revision+1;
+    if(el("sharedNote").value === text) noteDirty = false;
+    el("btnReloadNote").hidden = true;
+    el("noteMeta").textContent = `最終更新：${name}`;
+    if(latestNote && latestNote.revision > noteRevision){
+      if(!noteDirty) applyNote(latestNote);
+      else el("btnReloadNote").hidden = false;
+    }
+    noteMessage(noteDirty ? "保存しました。続けて入力した変更は未保存です。" : "保存して共有しました。");
+  }catch(error){
+    if(session !== noteSession) return;
+    noteMessage(error.message === "note-conflict" ? "相手の更新があるため保存しませんでした。入力内容をコピーして、最新メモを読み込んでください。" : "保存できませんでした。入力内容は残っています。接続やアクセス権限を確認して再度保存してください。");
+    if(error.message === "note-conflict") el("btnReloadNote").hidden = false;
+  }finally{if(session === noteSession){noteSaving = false;noteButtons();}}
+}
+function wireNotes(){
+  const tabs = [el("tabBudget"), el("tabNotes")];
+  const panels = [el("budgetPanel"), el("notesPanel")];
+  let active = 0;
+  function show(index, focus = false){
+    active = index;
+    tabs.forEach((tab,i) => {tab.setAttribute("aria-selected", String(i === index));tab.tabIndex = i === index ? 0 : -1;panels[i].hidden = i !== index;});
+    if(focus) tabs[index].focus();
+    if(index === 0 && pieChart) requestAnimationFrame(() => pieChart.resize());
+  }
+  tabs.forEach((tab,i) => {
+    tab.addEventListener("click", () => show(i));
+    tab.addEventListener("keydown", event => {
+      if(["ArrowLeft","ArrowRight","Home","End"].includes(event.key)){
+        event.preventDefault(); show(event.key === "Home" ? 0 : event.key === "End" ? 1 : 1-active, true);
+      }
+    });
+  });
+  let gesture = null;
+  const area = el("screenArea");
+  area.addEventListener("touchstart", event => {
+    gesture = null;
+    if(event.touches.length !== 1 || event.target.closest("input,textarea,select,button,a,canvas,[contenteditable]")) return;
+    // 横スクロールする明細表などは操作を優先する。
+    for(let n = event.target; n && n !== area; n = n.parentElement){ if(n.scrollWidth > n.clientWidth + 2) return; }
+    const touch = event.touches[0];
+    if(touch.clientX < 24 || touch.clientX > window.innerWidth - 24) return;
+    gesture = {x:touch.clientX,y:touch.clientY,time:Date.now()};
+  }, {passive:true});
+  area.addEventListener("touchmove", event => {
+    if(!gesture) return;
+    if(event.touches.length !== 1 || Math.abs(event.touches[0].clientY - gesture.y) > 35) gesture = null;
+  }, {passive:true});
+  area.addEventListener("touchcancel", () => {gesture = null;}, {passive:true});
+  area.addEventListener("touchend", event => {
+    if(!gesture) return;
+    const g = gesture; gesture = null;
+    const t = event.changedTouches[0], dx = t.clientX-g.x, dy = t.clientY-g.y;
+    if(Date.now()-g.time < 700 && Math.abs(dx)>70 && Math.abs(dx)>Math.abs(dy)*2){
+      if(dx<0 && active===0) show(1);
+      if(dx>0 && active===1) show(0);
+    }
+  }, {passive:true});
+  el("sharedNote").addEventListener("input", () => {noteDirty = true;noteButtons();noteMessage("未保存の変更があります。");});
+  el("btnSaveNote").addEventListener("click", saveNote);
+  el("btnReloadNote").addEventListener("click", () => {
+    if(noteDirty && !confirm("入力中の変更を破棄して、最新メモを読み込みますか？")) return;
+    applyNote(latestNote);noteMessage("最新メモを読み込みました。");
+  });
+  window.addEventListener("beforeunload", event => {if(noteDirty){event.preventDefault();event.returnValue = "";}});
+}
 wireUI();
 
 onAuthStateChanged(getAuthSafe(), async (user) => {
@@ -623,3 +762,4 @@ function getAuthSafe(){
   ensureFirebaseInitialized();
   return auth;
 }
+
