@@ -101,6 +101,11 @@
     .screenTabs button[aria-selected="true"]{background:var(--primarySoft);border-color:var(--primary);color:var(--primary2)}
     .screenPanel{min-width:0;animation:reveal .18s ease-out}
     .swipeHint{text-align:center;margin:8px 14px;color:var(--muted);font-size:12px}
+    .notesList{display:grid;gap:10px;margin-top:16px}
+    .noteItem{text-align:left;padding:14px;min-width:0}
+    .noteItem strong,.noteItem span{display:block;overflow-wrap:anywhere}
+    .noteItem span{margin-top:6px;white-space:pre-wrap}
+    .notesHeading{display:flex;align-items:center;justify-content:space-between;gap:12px}
     #sharedNote{min-height:48vh;resize:vertical;line-height:1.8;font-size:16px}
     @keyframes reveal{from{opacity:.5;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
     @media(prefers-reduced-motion:reduce){.screenPanel{animation:none}}
@@ -275,16 +280,31 @@
       </section>
   </div>
   <section id="notesPanel" class="card screenPanel" role="tabpanel" aria-labelledby="tabNotes" hidden>
-    <h2 class="sectionTitle">ふたりの共有メモ</h2>
-    <p class="muted">買い物リストや予定など、ふたりで使うメモ。同じ世帯コードで共有されます。</p>
-    <label for="sharedNote">メモ</label>
-    <textarea id="sharedNote" maxlength="20000" placeholder="買うもの、週末の予定、覚えておきたいこと…" disabled></textarea>
-    <div class="flex" style="margin-top:12px">
-      <span id="noteMeta" class="muted"></span>
-      <button id="btnSaveNote" class="primary" style="width:auto" disabled>保存して共有</button>
+    <div id="notesListView">
+      <div class="notesHeading">
+        <h2 class="sectionTitle" style="margin:0">ふたりの共有メモ</h2>
+        <button id="btnNewNote" class="primary" style="width:auto" disabled>＋ 新しいメモ</button>
+      </div>
+      <p class="muted">買い物や旅行の予定など、メモを分けて保存できます。どのメモもふたりで共有されます。</p>
+      <div id="notesList" class="notesList"></div>
+      <p id="notesEmpty" class="muted" hidden>まだメモはありません。「＋ 新しいメモ」から作成できます。</p>
+    </div>
+    <div id="noteEditor" hidden>
+      <div class="flex" style="margin-bottom:16px">
+        <button id="btnBackNotes" style="width:auto">‹ メモ一覧</button>
+        <button id="btnDeleteNote" class="danger" style="width:auto" disabled>削除</button>
+      </div>
+      <label for="noteTitle">タイトル</label>
+      <input id="noteTitle" maxlength="120" placeholder="例：買い物リスト" disabled />
+      <label for="sharedNote" style="margin-top:12px">本文</label>
+      <textarea id="sharedNote" maxlength="20000" placeholder="買うもの、週末の予定、覚えておきたいこと…" disabled></textarea>
+      <div class="flex" style="margin-top:12px">
+        <span id="noteMeta" class="muted"></span>
+        <button id="btnSaveNote" class="primary" style="width:auto" disabled>保存して共有</button>
+      </div>
+      <button id="btnReloadNote" style="margin-top:12px" hidden>相手の最新メモを読み込む</button>
     </div>
     <p id="noteStatus" class="muted" role="status" aria-live="polite">家計簿の世帯コードから接続してください。</p>
-    <button id="btnReloadNote" hidden>相手の最新メモを読み込む</button>
   </section>
 </main>
 
