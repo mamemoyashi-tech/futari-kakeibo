@@ -125,6 +125,10 @@
     .screenTabs button[aria-selected="false"]::after{content:none}
     .screenTabs button[aria-selected="true"]{background:var(--primarySoft);color:var(--text)}
     input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--muted);outline-offset:2px;box-shadow:0 0 0 3px var(--primarySoft)}
+    .noteLinks{margin:16px 0;padding:16px;background:var(--primarySoft);border-radius:12px}
+    #noteLinkList{display:grid;gap:10px;margin-top:10px}
+    #noteLinkList a{display:block;overflow-wrap:anywhere;color:var(--text);text-decoration:underline;text-underline-offset:3px;padding:10px 0;min-height:44px}
+    #noteLinkList a:focus-visible{outline:2px solid var(--muted);outline-offset:3px;border-radius:4px}
   </style>
 </head>
 <body>
@@ -286,6 +290,10 @@
       <input id="noteTitle" maxlength="120" placeholder="例：買い物リスト" disabled />
       <label for="sharedNote" style="margin-top:12px">本文</label>
       <textarea id="sharedNote" maxlength="20000" placeholder="買うもの、週末の予定、覚えておきたいこと…" disabled></textarea>
+      <section id="noteLinks" class="noteLinks" aria-label="メモ内のリンク" hidden>
+        <h3 class="sectionHeading" style="font-size:14px">メモ内のリンク</h3>
+        <div id="noteLinkList"></div>
+      </section>
       <div class="flex" style="margin-top:12px">
         <span id="noteMeta" class="muted"></span>
         <button id="btnSaveNote" class="primary" style="width:auto" disabled>保存して共有</button>
@@ -320,6 +328,6 @@
 </main>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="app.js?v=20261121-settings-autoconnect"></script>
+  <script type="module" src="app.js?v=20261122-note-links"></script>
 </body>
 </html>
