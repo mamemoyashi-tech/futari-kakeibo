@@ -1,7 +1,7 @@
 const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
 let source=fs.readFileSync(require('node:path').join(__dirname,'..','app.js'),'utf8').replace(/import[\s\S]*?from "https:[^"]+";/g,'');source=source.slice(0,source.lastIndexOf('\nwireUI();'));
 const nodes=new Map();function node(){return {value:'',textContent:'',hidden:false,disabled:false,children:[],listeners:{},clientWidth:390,scrollWidth:390,append(...v){this.children.push(...v)},appendChild(v){this.children.push(v)},replaceChildren(){this.children=[]},addEventListener(k,f){(this.listeners[k]??=[]).push(f)},setAttribute(){},focus(){}}}function el(id){if(!nodes.has(id))nodes.set(id,node());return nodes.get(id)}
-const storage=new Map();const docEvents=node();const c=vm.createContext({console,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v))},getComputedStyle:n=>({overflowX:n.overflowX||'visible'}),document:{getElementById:el,createElement:node,body:node(),addEventListener:docEvents.addEventListener.bind(docEvents)},window:{innerWidth:390,addEventListener(){}},requestAnimationFrame:f=>f(),confirm:()=>true});vm.runInContext(source,c);
+const storage=new Map();const docEvents=node();const c=vm.createContext({console,URL,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v))},getComputedStyle:n=>({overflowX:n.overflowX||'visible'}),document:{getElementById:el,createElement:node,body:node(),addEventListener:docEvents.addEventListener.bind(docEvents)},window:{innerWidth:390,addEventListener(){}},requestAnimationFrame:f=>f(),confirm:()=>true});vm.runInContext(source,c);
 vm.runInContext(`
 let server=new Map(),nextId=0,writes=0,subscription,errorCallback;
 collection=(...args)=>args;doc=(...args)=>args.length===1?{id:'note-'+(++nextId)}:args.at(-1);Timestamp={now:()=>({toMillis:()=>Date.now()})};serverTimestamp=()=>1;
@@ -53,5 +53,18 @@ const registrationStarted=new Promise(r=>enteredRegistration=r);
 setDoc=()=>{enteredRegistration();return new Promise(r=>releaseRegistration=r)};`);
 const connecting=run('connect()');await run('registrationStarted');await run('disconnect()');const beforeCancel=run('subscriptions');run('releaseRegistration()');await connecting;assert.equal(run('subscriptions'),beforeCancel);assert.equal(run('isConnected'),false);assert.equal(storage.get('hh_autoConnect'),'0');
 console.log('PASS: three screens, auto-connect migration, restored identity, disconnect opt-out and in-flight cancellation');
+// Pasted URLs are clickable without interpreting HTML or changing stored memo text.
+const linkText='資料 https://drive.google.com/file/d/demo/view?usp=sharing&x=1#page=2。\n参考 https://example.com/a_(b) と (https://example.org/test)。';
+el('sharedNote').value=linkText;run('updateNoteLinks()');
+assert.equal(el('noteLinkList').children.length,3);assert.equal(el('noteLinks').hidden,false);
+assert.equal(el('noteLinkList').children[0].href,'https://drive.google.com/file/d/demo/view?usp=sharing&x=1#page=2');
+assert.equal(el('noteLinkList').children[1].href,'https://example.com/a_(b)');
+assert.equal(el('noteLinkList').children[2].href,'https://example.org/test');
+assert.equal(el('noteLinkList').children[0].target,'_blank');assert.equal(el('noteLinkList').children[0].rel,'noopener noreferrer');assert.equal(el('sharedNote').value,linkText);
+el('sharedNote').value='javascript:alert(1) data:text/html,test <img src=x onerror=alert(1)>';run('updateNoteLinks()');assert.equal(el('noteLinks').hidden,true);assert.equal(el('noteLinkList').children.length,0);
+el('sharedNote').value='https://example.com https://example.com/';run('updateNoteLinks()');assert.equal(el('noteLinkList').children.length,1);
+run('applyNote({text:"https://docs.google.com/document/d/demo/edit",revision:1})');assert.equal(el('noteLinkList').children.length,1);
+console.log('PASS: Drive/Docs links, queries, fragments, punctuation, parentheses, deduplication and unsafe-protocol rejection');
 console.log('PASS: multiple notes, separate updates, list, revision conflicts, deletion, legacy note, stale-delete protection, disconnect cleanup');
 })();
+
