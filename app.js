@@ -615,9 +615,41 @@ function noteButtons(){
   el("noteTitle").disabled = !editable;
   el("sharedNote").disabled = !editable;
 }
+// URLs remain plain text in Firestore; only safe http(s) anchors are rendered in the UI.
+function extractNoteLinks(text){
+  const links = [], seen = new Set();
+  for(const match of String(text || "").matchAll(/https?:\/\/[^\s<>"'`]+/giu)){
+    let value = match[0].replace(/[。、，．！？；：「」『』【】〈〉《》）］｝.,;!]+$/gu, "");
+    // Keep balanced parentheses inside a URL, but drop surrounding prose punctuation.
+    for(const [open,close] of [["(",")"],["[","]"],["{","}"]]){
+      while(value.endsWith(close) && value.split(close).length > value.split(open).length) value=value.slice(0,-1);
+    }
+    try{
+      const url = new URL(value);
+      if(!["http:","https:"].includes(url.protocol) || !url.hostname || seen.has(url.href)) continue;
+      seen.add(url.href);links.push({text:value,href:url.href});
+    }catch{}
+  }
+  return links;
+}
+function updateNoteLinks(){
+  const links = extractNoteLinks(el("sharedNote").value);
+  const list = el("noteLinkList");
+  list.replaceChildren();
+  el("noteLinks").hidden = links.length === 0;
+  for(const link of links){
+    const anchor = document.createElement("a");
+    anchor.textContent=link.text;
+    anchor.href=link.href;
+    anchor.target="_blank";
+    anchor.rel="noopener noreferrer";
+    list.appendChild(anchor);
+  }
+}
 function applyNote(data){
   el("noteTitle").value = data?.title || (data ? "共有メモ" : "");
   el("sharedNote").value = data?.text || "";
+  updateNoteLinks();
   noteRevision = data?.revision || 0;
   noteDirty = false;
   el("btnReloadNote").hidden = true;
@@ -831,7 +863,7 @@ function wireNotes(){
     if(event.detail>0 && Date.now()<suppressClickUntil){event.preventDefault();event.stopImmediatePropagation();}
   }, true);
   for(const id of ["sharedNote","noteTitle"]){
-    el(id).addEventListener("input", () => {noteDirty=true;noteButtons();noteMessage("未保存の変更があります。");});
+    el(id).addEventListener("input", () => {noteDirty=true;noteButtons();updateNoteLinks();noteMessage("未保存の変更があります。");});
   }
   el("btnNewNote").addEventListener("click", () => openNote());
   el("btnBackNotes").addEventListener("click", backToNotes);
@@ -867,5 +899,6 @@ function getAuthSafe(){
   ensureFirebaseInitialized();
   return auth;
 }
+
 
 
